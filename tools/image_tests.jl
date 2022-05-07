@@ -88,13 +88,13 @@ end
 # Make sure there is a data specification
 @noimgcheck "Data source" data_source(incif) = begin
     messages = []
-    if !haskey(incif,"_array_data.data") && !haskey(incif,"_array_data.external_format") && !haskey(incif,"_array_data.external_path")
+    if !haskey(incif,"_array_data.data") && !haskey(incif,"_array_data.external_data_id")
         push!(messages,(false,"No source of image data specified"))
     end
     if haskey(incif,"_array_data.data")
         push!(messages,(true,"WARNING:raw data included in file, processing will be slow"))
     end
-    p = URI(incif["_array_data.external_location_uri"][1])
+    p = URI(incif["_array_data_external_data.uri"][1])
     if p.scheme == "file" || p.scheme == nothing
         push!(messages,(true,"WARNING: external data stored in local file system, this is not portable"))
     end
@@ -181,7 +181,18 @@ end
 
     cn = "_diffrn_scan_axis."  #for brevity
 
+    # account for unlooped case
+    
     scan_loop = get_loop(incif,cn*"axis_id")
+    if size(scan_loop,1) == 0 && haskey(incif,cn*"axis_id")
+        loop_names = [cn*"axis_id",cn*"displacement_range",cn*"angle_range",cn*"angle_start",
+                      cn*"angle_increment",cn*"displacement_increment",cn*"displacement_start"]
+        for n in loop_names
+            if !haskey(incif,n) incif[n] = [missing] end
+        end
+        create_loop!(incif,loop_names)
+        scan_loop = get_loop(incif,cn*"axis_id")
+    end
 
     actual = filter(scan_loop) do r
         !ismissing(getproperty(r,cn*"displacement_range")) || !ismissing(getproperty(r,cn*"angle_range"))
@@ -227,7 +238,7 @@ end
         if abs(nosteps - numsteps) > 0.3
             push!(messages,(false,"Range/increment do not match number of steps $nosteps for scan $scan_id, expected $numsteps"))
         else
-            push!(messages,(true,"Range/increment match number of steps $nosteps for scan $scan_id (expected $numsteps"))
+            push!(messages,(true,"Range/increment match number of steps $nosteps for scan $scan_id (expected $numsteps)"))
         end
     end
     return messages
@@ -308,10 +319,10 @@ const img_types = Dict(UInt8 =>"unsigned 8-bit integer",
     if haskey(incif,"_array_structure.encoding_type") && img_types[eltype(img)] != incif["_array_structure.encoding_type"][1]
         push!(messages,(false,"Stated encoding $(incif["_array_structure.encoding_type"][1]) does not match array element type $(eltype(img))"))
     end
-    if haskey(incif,"_array_structure.byte_order") && haskey(incif,"_array_data.external_format")
+    if haskey(incif,"_array_structure.byte_order") && haskey(incif,"_array_data.external_data_id")
         push!(messages,(true,"WARNING: byte order provided in file containing external data pointers"))
     end
-    if haskey(incif,"_array_structure.compression") && incif["_array_structure.compression"][1] != "none" && haskey(incif,"_array_data.external_format")
+    if haskey(incif,"_array_structure.compression") && incif["_array_structure.compression"][1] != "none" && haskey(incif,"_array_data.external_data_id")
         push!(messages,(true,"Externally-provided data by definition is uncompressed but compression is specified as $(incif["array_structure.compression"][1])"))
     end
     return messages
@@ -328,7 +339,7 @@ end
     `subs` is a dictionary of local file equivalents to urls.
 """
 download_archives(incif;get_full=false,pick=1,subs=Dict()) = begin
-    urls = unique(incif["_array_data.external_location_uri"])
+    urls = unique(incif["_array_data_external_data.uri"])
     if !isempty(subs)
         for u in urls
             if !(u in keys(subs))
@@ -344,10 +355,10 @@ download_archives(incif;get_full=false,pick=1,subs=Dict()) = begin
         else
             loc = URI(make_absolute_uri(incif,u))
         end
-        pos = indexin([u],incif["_array_data.external_location_uri"])[]
+        pos = indexin([u],incif["_array_data_external_data.uri"])[]
         arch_type = nothing
-        if haskey(incif,"_array_data.external_compression")
-            arch_type = incif["_array_data.external_compression"][pos]
+        if haskey(incif,"_array_data_external_data.archive_format")
+            arch_type = incif["_array_data_external_data.archive_format"][pos]
         end
         x = ""
         if !get_full && arch_type in ("TBZ","TGZ","TAR")
@@ -394,7 +405,7 @@ end
 """
 find_load_id(incif,archive_list,have_full) = begin
 
-    known_paths = incif["_array_data.external_archive_path"]
+    known_paths = incif["_array_data_external_data.archive_path"]
     
     # First see if our frame is in the file
 
@@ -403,6 +414,10 @@ find_load_id(incif,archive_list,have_full) = begin
         for (k,v) in archive_list
             if v in known_paths
                 pos = indexin([v],known_paths)[]
+                # a level of indirection
+                ext_data_id = incif["_array_data_external_data.id"][pos]
+                vv = incif["_array_data.external_data_id"]
+                pos = indexin([ext_data_id],vv)[]
                 return incif["_array_data.binary_id"][pos]
             end
         end
@@ -536,6 +551,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
                 testimage = imgload(incif,load_id;local_version=subs)
             end
         catch e
+            @debug e
             verdict([(false,"Unable to access image $load_id: $e")])
             rethrow()
         end

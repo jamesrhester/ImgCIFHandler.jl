@@ -47,31 +47,40 @@ Return the image referenced in CIF Block `c` corresponding to the specified raw 
 `local_version` gives local copies for URLs listed in `c`.
 """
 imgload(c::CifContainer,frame_id;local_version=Dict()) = begin
-    cat = "_array_data"   #for convenience
-    ext_loop = get_loop(c,"$cat.binary_id")
-    if !("$cat.external_format" in names(ext_loop))
-        throw(error("$(c.original_file) does not contain external data pointers"))
+    ext_cat = "_array_data_external_data"   #for convenience
+    cat = "_array_data"
+    
+    img_loop = get_loop(c,"$cat.binary_id")
+    if !("$cat.external_data_id" in names(img_loop))
+        @error "$(c.original_file) does not contain external data pointers" img_loop
     end
     if !("$frame_id" in c["$cat.binary_id"])
         throw(error("Data with id $frame_id is not found"))
     end
-    info = filter(row -> row["$cat.binary_id"] == "$frame_id", ext_loop,view=true)
+    info = filter(row -> row["$cat.binary_id"] == "$frame_id", img_loop,view=true)
     if size(info)[1] > 1
         throw(error("Array data $frame_id is ambiguous"))
     end
     if size(info)[1] == 0
         throw(error("No array data with id $frame_id found"))
     end
+
+    # One level of indirection
+
+    ext_id = info[1,"$cat.external_data_id"]
+    ext_loop = get_loop(c,"$ext_cat.id")
+    info = filter(row -> row["$ext_cat.id"] == ext_id, ext_loop, view = true)
+
     info = info[1,:]
     all_cols = names(info)
-    full_uri = make_absolute_uri(c,info["$cat.external_location_uri"])
+    full_uri = make_absolute_uri(c,info["$ext_cat.uri"])
     println("Loading image from $full_uri")
-    ext_loc = "$cat.external_path" in all_cols ? info["$cat.external_path"] : nothing
-    ext_format = "$cat.external_format" in all_cols ? Val(Symbol(info["$cat.external_format"])) : nothing
-    ext_comp = "$cat.external_compression" in all_cols ? info["$cat.external_compression"] : nothing
-    ext_ap = "$cat.external_archive_path" in all_cols ? info["$cat.external_archive_path"] : nothing
-    ext_frame = "$cat.external_frame" in all_cols ? info["$cat.external_frame"] : nothing
-    local_copy =  get(info,"$cat.external_location_uri", nothing)
+    ext_loc = "$ext_cat.path" in all_cols ? info["$ext_cat.path"] : nothing
+    ext_format = "$ext_cat.format" in all_cols ? Val(Symbol(info["$ext_cat.format"])) : nothing
+    ext_comp = "$ext_cat.archive_format" in all_cols ? info["$ext_cat.archive_format"] : nothing
+    ext_ap = "$ext_cat.archive_path" in all_cols ? info["$ext_cat.archive_path"] : nothing
+    ext_frame = "$ext_cat.frame" in all_cols ? info["$ext_cat.frame"] : nothing
+    local_copy =  get(info,"$ext_cat.uri", nothing)
     if !isnothing(local_copy)
         local_copy = get(local_version,local_copy,nothing)
         @debug "Loading image from $local_copy"
@@ -411,9 +420,9 @@ peek_image(uri::URI,arch_type,cif_block::CifContainer;entry_no=0,check_name=true
 
     @debug fname
     if fname != nothing && check_name
-        if haskey(cif_block,"_array_data.external_archive_path")
-            pos = indexin([fname],cif_block["_array_data.external_archive_path"])[]
-            if pos != nothing && cif_block["_array_data.external_location_uri"][pos] == "$uri"
+        if haskey(cif_block,"_array_data_external_data.archive_path")
+            pos = indexin([fname],cif_block["_array_data_external_data.archive_path"])[]
+            if pos != nothing && cif_block["_array_data_external_data.uri"][pos] == "$uri"
                 return fname
             end
         end
