@@ -8,7 +8,7 @@ Pkg.instantiate()
 using ImgCIFHandler#main
 using ImageInTerminal, Colors,ImageContrastAdjustment
 using ArgParse
-using CrystalInfoFramework,FilePaths,URIs, Tar
+using CrystalInfoFramework,FilePaths,URIs, Tar, Images
 
 # Tests for imgCIF files
 const test_list = []
@@ -457,6 +457,21 @@ display_check_image(im;logscale=true,cut_ratio=1000) = begin
 end
 
 """
+Save an image
+"""
+save_check_image(im,imfn;logscale=true,cut_ratio=1000) = begin
+    
+    if maximum(im) > 1.0
+        im = im/maximum(im)
+    end
+    clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
+    alg = LinearStretching(src_maxval = clamp_high)
+    im_new = adjust_histogram(im,alg)
+    save(imfn, im_new)
+    return im_new
+end
+
+"""
 Find the best value for displaying a diffraction image, calculated as the first
 intensity bin that has 1000 times less points than the highest. Based on the
 logic that the highest value will be a "typical" background point. Skip any
@@ -496,7 +511,7 @@ end
 
 ==#
 
-run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict()) = begin
+run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false) = begin
     ok = true
     println("Running checks (no image download)")
     println("="^40*"\n")
@@ -540,7 +555,14 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
             verdict([(false,"Unable to access image $load_id: $e")])
             rethrow()
         end
-        display_check_image(testimage,logscale=false)
+        
+        if savepng
+            imgfn=string(incif.original_file,".png") 
+            save_check_image(testimage, imgfn, logscale=false)
+        else
+            display_check_image(testimage,logscale=false)
+        end
+        
         for (desc,one_test) in test_list_with_img
             print("\nTesting image $load_id: $desc: ")
             ok = ok & verdict(one_test(incif,testimage,load_id))
@@ -566,6 +588,9 @@ parse_cmdline(d) = begin
         nargs = 0
         "-j", "--always-check-images"
         help = "Check images even if non-image checks fail"
+        nargs = 0
+        "-o", "--output-png"
+        help = "Save downloaded image as <filename>.png"
         nargs = 0
         "-d", "--dictionary"
         help = "Check conformance to <dictionary>"
@@ -621,7 +646,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 full = parsed_args["full-download"],
                                 connected = !parsed_args["no-internet"],
                                 pick = parsed_args["pick"][],
-                                subs = subs
+                                subs = subs,
+                                savepng = parsed_args["output-png"]
                                 )
     println("\n====End of Checks====")
     if result exit(0) else exit(1) end
