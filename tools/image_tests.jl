@@ -134,6 +134,9 @@ end
     if haskey(incif,"_diffrn_detector_element.id") && length(unique(incif["_diffrn_detector_element.id"])) > 1
         push!(messages(false,"WARNING: cannot currently correctly check files with more than one detector element"))
     end
+    if haskey(incif,"_diffrn.id") && length(incif["_diffrn.id"]) > 1
+        push!(messages(false,"WARNING: cannot currently correctly check files with more than one set of diffraction conditions (more than one diffrn.id)"))
+    end
     return messages
 end
 
@@ -178,6 +181,9 @@ end
 
 @noimgcheck "Scan range" scan_range(incif) = begin
     # Check that scan ranges are correct
+    # The scan range is the total range from start of first step
+    # to the end of the final step.
+    
     messages = []
 
     cn = "_diffrn_scan_axis."  #for brevity
@@ -287,6 +293,93 @@ end
             push!(messages,(false,"Only $(length(ufn)) frames specified for scan $one_scan instead of $nsteps"))
         else
             push!(messages,(true,"All frames present and correct for $one_scan"))
+        end
+    end
+    return messages
+end
+
+@noimgcheck "Detector surface axes used properly" check_surface_axes(incif) = begin
+    messages = []
+
+    surf_axes = unique(incif["_array_structure_list_axis.axis_id"])
+
+    # these axes should not be listed in axis setting lists
+
+    if !isdisjoint(surf_axes,incif["_diffrn_scan_axis.axis_id"])
+        push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_axis"))
+    end
+    if !isdisjoint(surf_axes,incif["_diffrn_scan_frame_axis.axis_id"])
+        push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_frame_axis"))
+    end
+    return messages
+end
+
+@noimgcheck "Pixel size and origin described correctly" check_pixel_coords(incif) = begin
+    messages = []
+
+    origin = parse.(Float64,incif["_array_structure_list_axis.displacement"]) #in mm
+    origin_set = incif["_array_structure_list_axis.axis_set_id"]
+    if 0 in origin
+        push!(messages,(false,"Origin of array coordinates should be in centre of pixel but at least one value of _array_structure_list_axis.displacement is 0"))
+    end
+
+    # Check that pixels are displaced by half their size
+    
+    if haskey(incif,"_array_element_size.size") # in metres!!
+        elsize = parse.(Float64,incif["_array_element_size.size"]*10^3)
+        elind = parse.(Int32,incif["_array_element_size.index"])
+        for oneind in elind
+            asind = indexin([oneind],incif["_array_structure_list.index"])[]
+            setind = incif["_array_structure_list.axis_set_id"][asind]
+            disp_ind = indexin([setind],origin_set)
+            disp = origin[disp_ind]
+            @debug disp elsize[oneind]
+            if abs(disp) != elsize[oneind]/2.0
+                push!(messages,(false,"Pixel axis displacement $disp mm is not at centre of pixel of corresponding dimension $(elsize[oneind]) mm"))
+            end
+        end
+    end
+
+    return messages
+end
+
+@noimgcheck "Check calculated beam centre" check_beam_centre(incif) = begin
+    messages = []
+
+    centre1,centre2,index1,index2 = get_beam_centre(incif)
+    if index1 < 0 || index2 < 0
+        push!(messages,(false,"Beam centre in pixels $index1, $index2 for zero axis settings has at least one negative value, which implies a position off the detector"))
+    end
+
+    dimensions = parse.(Int64,incif["_array_structure_list.dimension"])
+    precs = parse.(Int64,incif["_array_structure_list.precedence"])
+
+    # index1 is lowest precedence, index2 is highest
+
+    indexify = indexin([2,1],precs)
+    for (pix_cent, prec) in zip((index1,index2),indexify)
+        if pix_cent > dimensions[prec]
+            push!(messages,(false,"Beam centre coordinate in pixels $pix_cent for zero axis settings is greater than maximum dimension $(dimensions[prec]), which implies a position off the detector"))
+        end
+    end
+
+    return messages
+end
+
+@noimgcheck "Check principal axis is aligned with X" check_principal_axis(incif) = begin
+    messages = []
+
+    ga,gt = get_gonio_axes(incif)
+    axloop = get_loop(incif,"_axis.id")
+    filt_axis = filter(row -> row["_axis.equipment"] == "goniometer" &&
+                       row["_axis.type"] == "rotation" &&
+                       row["_axis.depends_on"] == nothing, axloop, view=true)
+    if size(filt_axis,1) != 1
+        push!(messages,(false,"Incorrectly specified goniometer axes: more than one base goniometer axis (ie _axis.depends_on is '.')"))
+    else
+        row = filt_axis(1,!)
+        if row["_axis.vector1"] != 1 || row["_axis.vector2"] != 0 || row["_axis.vector3"] != 0
+            push!(messages(false,"Principal axis $(row["_axis.id"]) is not the same as the X axis"))
         end
     end
     return messages

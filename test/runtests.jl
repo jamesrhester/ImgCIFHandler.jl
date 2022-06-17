@@ -56,12 +56,12 @@ end
 
 @testset "Test axis getting and setting" begin
     a,t,p = get_detector_axis_settings(b4master)
-    @test issetequal(a,["trans","detx","dety","twotheta"])
+    @test issetequal(a,["trans","two_theta"])
     a,t,p = get_detector_axis_settings(b4master,"SCAN1",3)
     trans = indexin(["trans"],a)[]
     @test p[trans] == 287.22
     handle = ImgCIFHandler.cbf_read_file(b4master)
-    twotheta = indexin(["two_theta"],a)
+    twotheta = indexin(["two_theta"],a)[]
     p[twotheta] = 21.2
     ImgCIFHandler.cbf_set_axis_positions(handle,a,t,p)
 
@@ -70,13 +70,14 @@ end
     ImgCIFHandler.cbf_find_category(handle,"diffrn_scan_frame_axis")
     ImgCIFHandler.cbf_find_column(handle,"axis_id")
     ImgCIFHandler.cbf_find_row(handle,"two_theta")
-    ImgCIFHandler.cbf_find_column(handle,"rotation")
-    tt = ImgCIFHandler.cbf_get_doublevalue(handle)
-    @test tt == p[twotheta]
+    ImgCIFHandler.cbf_find_column(handle,"angle")
+    tt = ImgCIFHandler.cbf_get_string_value(handle)
+    @test tt == "$(p[twotheta])"
 end
 
 @testset "Test beam centre calculation" begin
-    
+    c1,c2,i1,i2 = get_beam_centre(b4master)
+    @test isapprox(c1, 2299.962, atol= 0.0001)
 end
 
 

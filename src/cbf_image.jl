@@ -149,11 +149,11 @@ cbf_count_rows(handle::CBF_Handle) = begin
 end
 
 cbf_get_value(handle::CBF_Handle) = begin
-    newval = 0.0
+    newval = Ref{Float64}(0)
     errno = ccall((:cbf_get_doublevalue,libcbf),Cint,
                   (Ptr{CBF_Handle_Struct},Ref{Float64}),handle.handle,newval)
-    cbf_error(errno,extra = "while setting value to $newval")
-    return newval
+    cbf_error(errno,extra = "while getting value ")
+    return newval[]
 end
 
 cbf_get_string_value(handle::CBF_Handle) = begin
@@ -544,6 +544,10 @@ get_beam_centre(filename::AbstractString,args...) = begin
     cbf_error(err_no, extra = "while destructing detector")
     return centre1,centre2,index1,index2
 
+end
+
+get_beam_centre(incif::CifContainer,args...) = begin
+    get_beam_centre("$(incif.original_file)",args...)
 end
 
 cbf_error(val;extra="") = begin

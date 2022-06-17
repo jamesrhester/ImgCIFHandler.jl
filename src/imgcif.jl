@@ -80,3 +80,17 @@ get_detector_axis_settings(imgcif::CifContainer) = begin
     axis_names,axis_types = get_detector_axes(imgcif)
     return axis_names,axis_types,fill(0.0,length(axis_names))
 end
+
+"""
+    get_gonio_axes(imgcif::CifContainer;check=false)
+
+Return a list of goniometer axes, together with type (rotation/translation).
+"""
+get_gonio_axes(imgcif::CifContainer) = begin
+    axis_loop = get_loop(imgcif,"_axis.id")
+
+    filt_axis = filter(row -> row["_axis.equipment"] == "goniometer",axis_loop, view=true)
+    gonio_axes = String.(filt_axis[!,"_axis.id"])
+
+    return gonio_axes,String.(filt_axis[!,"_axis.type"])
+end
