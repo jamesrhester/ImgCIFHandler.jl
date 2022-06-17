@@ -61,6 +61,7 @@ end
                   "_diffrn_scan_axis.angle_start",
                   "_diffrn_scan_axis.displacement_start",
                   "_diffrn_scan_axis.angle_range",
+                  "_diffrn_scan_axis.displacement_increment",
                   "_diffrn_scan_axis.displacement_range",
                   "_diffrn_scan_axis.angle_increment",
                   "_diffrn_scan.frames",

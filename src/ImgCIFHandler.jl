@@ -31,10 +31,13 @@ using SimpleBufferStream
 export imgload         #Load raw data
 export peek_image      #Find first image in archive
 export make_absolute_uri #Use Cif block contents to make absolute URI
+export get_detector_axis_settings #Get axis settings for particular frame
+export get_beam_centre
 
 include("hdf_image.jl")
 include("cbf_image.jl")
 include("adsc_image.jl")
+include("imgcif.jl")
 
 get_image_ids(c::CifContainer) = begin
     return c["_array_data.binary_id"]

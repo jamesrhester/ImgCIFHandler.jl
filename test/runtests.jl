@@ -3,6 +3,8 @@ using ImgCIFHandler
 using Test
 using URIs
 
+const b4master = joinpath(@__DIR__,"testfiles/b4_master.cif")
+
 extract_files() = begin
     # Uncompress archive
     archfile = joinpath(@__DIR__,"testfiles/b4_mini.tar.bz2")
@@ -33,7 +35,7 @@ end
 
 @testset "Test variants of imgload" begin
     extract_files()
-    x = imgload(joinpath(@__DIR__,"testfiles/b4_master.cif"))
+    x = imgload(b4master)
     @test size(x) == (4148,4362)
 end
 
@@ -51,5 +53,31 @@ end
     x = imgload(URI(scheme="file",path=loc),Val(:CBF),arch_type="TBZ",arch_path="s01f0003.cbf")
     @test size(x) == (4148,4362)
 end
+
+@testset "Test axis getting and setting" begin
+    a,t,p = get_detector_axis_settings(b4master)
+    @test issetequal(a,["trans","detx","dety","twotheta"])
+    a,t,p = get_detector_axis_settings(b4master,"SCAN1",3)
+    trans = indexin(["trans"],a)[]
+    @test p[trans] == 287.22
+    handle = ImgCIFHandler.cbf_read_file(b4master)
+    twotheta = indexin(["two_theta"],a)
+    p[twotheta] = 21.2
+    ImgCIFHandler.cbf_set_axis_positions(handle,a,t,p)
+
+    # Read it back in
+
+    ImgCIFHandler.cbf_find_category(handle,"diffrn_scan_frame_axis")
+    ImgCIFHandler.cbf_find_column(handle,"axis_id")
+    ImgCIFHandler.cbf_find_row(handle,"two_theta")
+    ImgCIFHandler.cbf_find_column(handle,"rotation")
+    tt = ImgCIFHandler.cbf_get_doublevalue(handle)
+    @test tt == p[twotheta]
+end
+
+@testset "Test beam centre calculation" begin
+    
+end
+
 
 clean_up()

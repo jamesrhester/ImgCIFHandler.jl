@@ -28,10 +28,10 @@ _diffrn_source.facility	Diamond
          phi        rotation  goniometer  chi  -1.0 -0.0037 -0.002  0  0  0
          chi        rotation  goniometer  omega  0.0046 0.0372 0.9993  0  0  0
          omega      rotation  goniometer  .  -1.0 0.0 0.0  0  0  0
-         two_theta  rotation     detector    .          ?   0  0   0  0  0
-         trans      translation  detector    two_theta  0   0  -1   0  0  287.2224260231453
-         detx       translation  detector    trans      1   0  0  -2224.980974985656  0  0
-         dety       translation  detector    trans      0  -1  0   0  2299.962008717926  0
+         two_theta  rotation     detector    .          1   0  0   0  0  0
+         trans      translation  detector    two_theta  0   0  -1   0  0  0 
+         detx       translation  detector    trans      1   0  0  -2224.980974985656  2299.962  0
+         dety       translation  detector    detx       0  -1  0   0  0  0
 
     loop_
       _array_structure_list_axis.axis_id
@@ -146,13 +146,17 @@ _diffrn_source.facility	Diamond
 
     _diffrn_scan.id SCAN1
     _diffrn_scan.frames                      22
-    _diffrn_scan_axis.axis_id                omega
-    _diffrn_scan_axis.angle_start            0.0
-    _diffrn_scan_axis.angle_range            2.1
-    _diffrn_scan_axis.angle_increment        0.1
-    _diffrn_scan_axis.displacement_start       0
-    _diffrn_scan_axis.displacement_range       0
-    _diffrn_scan_axis.displacement_increment   0
+loop_
+    _diffrn_scan_axis.axis_id               
+    _diffrn_scan_axis.scan_id               
+    _diffrn_scan_axis.angle_start          
+    _diffrn_scan_axis.angle_range         
+    _diffrn_scan_axis.angle_increment    
+    _diffrn_scan_axis.displacement_start     
+    _diffrn_scan_axis.displacement_range    
+    _diffrn_scan_axis.displacement_increment 
+omega SCAN1 0.0 2.1 0.1 0 0 0
+trans SCAN1 . . . 287.22 0 0
 
     loop_
       _diffrn_scan_frame.frame_id
