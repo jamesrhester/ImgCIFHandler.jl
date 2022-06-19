@@ -308,7 +308,8 @@ end
     if !isdisjoint(surf_axes,incif["_diffrn_scan_axis.axis_id"])
         push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_axis"))
     end
-    if !isdisjoint(surf_axes,incif["_diffrn_scan_frame_axis.axis_id"])
+    if haskey(incif,"_diffrn_scan_frame_axs.axis_id") &&
+        !isdisjoint(surf_axes,incif["_diffrn_scan_frame_axis.axis_id"])
         push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_frame_axis"))
     end
     return messages
@@ -377,9 +378,9 @@ end
     if size(filt_axis,1) != 1
         push!(messages,(false,"Incorrectly specified goniometer axes: more than one base goniometer axis (ie _axis.depends_on is '.')"))
     else
-        row = filt_axis(1,!)
-        if row["_axis.vector1"] != 1 || row["_axis.vector2"] != 0 || row["_axis.vector3"] != 0
-            push!(messages(false,"Principal axis $(row["_axis.id"]) is not the same as the X axis"))
+        row = filt_axis[1,:]
+        if row["_axis.vector[1]"] != 1 || row["_axis.vector[2]"] != 0 || row["_axis.vector[3]"] != 0
+            push!(messages,(false,"Principal axis $(row["_axis.id"]) is not the same as the X axis"))
         end
     end
     return messages
