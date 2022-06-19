@@ -25,3 +25,5 @@ needing to download the whole archive each time the program is run.
 ### Updating
 
 Overwrite `image_test.jl` and `Project.toml` from step 2 above with the latest copies from here.
+Delete the file `Manifest.toml` from the same directory as otherwise the latest version of
+`ImgCIFHandler.jl` may not be used.

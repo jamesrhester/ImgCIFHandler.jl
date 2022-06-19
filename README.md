@@ -21,7 +21,9 @@ To install this package, at the Julia package prompt (reached by typing `]` at t
 
 # Use
 
-After installation, typing 'using ImgCIFHandler' will import the package. A single function `imgload` will be in scope. This function can be used to
+After installation, typing 'using ImgCIFHandler' will import the package. The following functions will be in scope:
+
+1. `imgload`. This function can be used to
 access raw data stored using pointers within imgCIF files. The example file [`b4_master.cif`](test/testfiles/b4_master.cif) contains such pointers.
 For example, to read the raw data array labelled `ext1` in `b4_master.cif` the following call is used:
 
@@ -31,6 +33,8 @@ x = imgload("b4_master.cif","ext1")
 
 Note that this command will only work if the images referred to in `b4_master.cif` actually exist. To create those files locally, unpack the 
 `b4_mini.tar.bz2` contents into location `test/testfiles/test_cbf_unzipped`.
+
+2. `get_beam_centre(filename)`. This will calculate the beam centre in pixel and detector coordinates.
 
 # Supported external formats
 
