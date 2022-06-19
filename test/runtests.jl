@@ -77,7 +77,7 @@ end
 
 @testset "Test beam centre calculation" begin
     c1,c2,i1,i2 = get_beam_centre(b4master)
-    @test isapprox(c1, 2299.962, atol= 0.0001)
+    @test isapprox(c1, 172.4595, atol= 0.0001)
 end
 
 
