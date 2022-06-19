@@ -379,7 +379,7 @@ end
         push!(messages,(false,"Incorrectly specified goniometer axes: more than one base goniometer axis (ie _axis.depends_on is '.')"))
     else
         row = filt_axis[1,:]
-        if row["_axis.vector[1]"] != 1 || row["_axis.vector[2]"] != 0 || row["_axis.vector[3]"] != 0
+        if parse(Float64,row["_axis.vector[1]"]) != 1 || parse(Float64,row["_axis.vector[2]"]) != 0 || parse(Float64,row["_axis.vector[3]"]) != 0
             push!(messages,(false,"Principal axis $(row["_axis.id"]) is not the same as the X axis"))
         end
     end
