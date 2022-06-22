@@ -457,7 +457,7 @@ cbf_get_beam_center(handle) = begin
     index2 = Ref{Float64}(0.0)
     centre1 = Ref{Float64}(0.0)
     centre2 = Ref{Float64}(0.0)
-    println("Det info is: $(handle.handle)")
+    @debug "Det info is: $(handle.handle)"
     err_no = ccall((:cbf_get_beam_center,libcbf),Cint,
                    (Ptr{CBF_Detector_Struct},
                     Ref{Float64},

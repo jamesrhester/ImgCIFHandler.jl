@@ -89,8 +89,9 @@ end
 # Make sure there is a data specification
 @noimgcheck "Data source" data_source(incif) = begin
     messages = []
-    if !haskey(incif,"_array_data.data") && !haskey(incif,"_array_data.external_data_id")
+    if !haskey(incif,"_array_data.data") && !haskey(incif,"_array_data_external_data.id")
         push!(messages,(false,"No source of image data specified"))
+        return messages
     end
     if haskey(incif,"_array_data.data")
         push!(messages,(true,"WARNING:raw data included in file, processing will be slow"))
@@ -125,7 +126,7 @@ end
 
 @noimgcheck "Our limitations" our_limitations(incif) = begin
     messages = []
-    if length(unique(incif["_array_data.array_id"])) > 1
+    if haskey(incif,"_array_data.array_id") && length(unique(incif["_array_data.array_id"])) > 1
         push!(messages,(false,"WARNING: cannot currently correctly check files with more than one data array structure"))
     end
     if haskey(incif,"_diffrn_detector.id") && length(unique(incif["_diffrn_detector.id"])) > 1
@@ -258,6 +259,10 @@ end
 
     # Get expected number of frames per scan
 
+    if !haskey(incif,basename*"frames")
+        return messages
+    end
+    
     numsteps = parse.(Int64,incif[basename*"frames"])
     if length(numsteps) > 1 || haskey(incif,basename*"id")
         scan_names = incif[basename*"id"]
@@ -305,10 +310,13 @@ end
 
     # these axes should not be listed in axis setting lists
 
-    if !isdisjoint(surf_axes,incif["_diffrn_scan_axis.axis_id"])
-        push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_axis"))
+    if haskey(incif,"_diffrn_scan_axis.axis_id")
+        if !isdisjoint(surf_axes,incif["_diffrn_scan_axis.axis_id"])
+            push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_axis"))
+        end
     end
-    if haskey(incif,"_diffrn_scan_frame_axs.axis_id") &&
+    
+    if haskey(incif,"_diffrn_scan_frame_axis.axis_id") &&
         !isdisjoint(surf_axes,incif["_diffrn_scan_frame_axis.axis_id"])
         push!(messages,(false,"Detector surface axes $surf_axes should not be listed in _diffrn_scan_frame_axis"))
     end
@@ -327,15 +335,15 @@ end
     # Check that pixels are displaced by half their size
     
     if haskey(incif,"_array_element_size.size") # in metres!!
-        elsize = parse.(Float64,incif["_array_element_size.size"]*10^3)
-        elind = parse.(Int32,incif["_array_element_size.index"])
+        elsize = parse.(Float64,incif["_array_element_size.size"])*10^3
+        elind = parse.(Int64,incif["_array_element_size.index"])
         for oneind in elind
-            asind = indexin([oneind],incif["_array_structure_list.index"])[]
+            asind = indexin([oneind],parse.(Int64,incif["_array_structure_list.index"]))[]
             setind = incif["_array_structure_list.axis_set_id"][asind]
-            disp_ind = indexin([setind],origin_set)
+            disp_ind = indexin([setind],origin_set)[]
             disp = origin[disp_ind]
             @debug disp elsize[oneind]
-            if abs(disp) != elsize[oneind]/2.0
+            if !isapprox(abs(disp), elsize[oneind]/2.0,atol=0.000001)
                 push!(messages,(false,"Pixel axis displacement $disp mm is not at centre of pixel of corresponding dimension $(elsize[oneind]) mm"))
             end
         end
