@@ -558,14 +558,13 @@ verdict(msg_list) = begin
 end
 
 """
-    create_check_image(incif,im;logscale=true,cut_ratio=1000)
+    create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true)
 
-Create a correctly oriented image from the matrix `im` using geometry 
-information in `incif`. We want the top
-left of the image to be the top left of the detector looking from the
-sample position. Returns the image and the rotation of the original.
+Create a contrast enhanced image from the matrix `im`. If `gravity` is true, 
+information in `incif` is used, if available, to rotate the image so that down on the image 
+becomes down in real space. Returns the image and the rotation of the original.
 """
-create_check_image(incif,im;logscale=true,cut_ratio=1000) = begin
+create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
     
     # First try to improve contrast
     
@@ -580,7 +579,7 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000) = begin
 
     # Adjust geometry if we know gravity
 
-    if !("gravity" in incif["_axis.equipment"]) return im_new,0 end
+    if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,0 end
 
     gravity = indexin(["gravity"],incif["_axis.equipment"])[]
     grav_vec = parse.(Float64,
@@ -613,12 +612,13 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000) = begin
     # Simplest is just to try the 4 possible rotations
 
     rot = nothing
-    for r in (0,90,180,270)
+    for d in 0:3
+        r=d*90
         try_x = fast_dir[1]*cosd(r) + fast_dir[2]*sind(r)
         try_y = -fast_dir[1]*sind(r) + fast_dir[2]*cosd(r)
         if isapprox(try_x,grav_vec[1],atol=0.1) && isapprox(try_y,grav_vec[2],atol=0.1)
-            rot = r
-            @debug "Image rotated by " rot
+            rot = d
+            @debug "Image rotated by " rot*90
             break
         end
     end
@@ -628,9 +628,9 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000) = begin
         rot = 0
     end
 
-    imrotate!(im_new,rot*pi/180)
+    im_new = rotl90(im_new,rot)
     
-    return im_new,rot
+    return im_new,rot*90
 end
 
 annotate_check_image(im, rot) = begin
@@ -639,7 +639,7 @@ end
 
 show_check_image(im;savefn=nothing) = begin
     if savefn != nothing
-        save(imfn, im)
+        save(savefn, Gray.(im))
     else
         println("Image for checking")
         imshow(Gray.(im))
