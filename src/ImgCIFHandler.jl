@@ -34,6 +34,7 @@ export make_absolute_uri #Use Cif block contents to make absolute URI
 export get_detector_axis_settings #Get axis settings for particular frame
 export get_beam_centre
 export get_gonio_axes
+export get_pixel_coordinates
 
 include("hdf_image.jl")
 include("cbf_image.jl")

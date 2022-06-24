@@ -469,6 +469,22 @@ cbf_get_beam_center(handle) = begin
     return centre1[],centre2[],index1[],index2[]
 end
 
+cbf_get_pixel_coordinates(handle,slowcoord,fastcoord) = begin
+    coordx = Ref{Float64}(0.0)
+    coordy = Ref{Float64}(0.0)
+    coordz = Ref{Float64}(0.0)
+    err_no = ccall((:cbf_get_pixel_coordinates,libcbf),Cint,
+                   (Ptr{CBF_Detector_Struct},
+                   Cdouble,
+                   Cdouble,
+                   Ref{Cdouble},
+                   Ref{Cdouble},
+                   Ref{Cdouble}),
+                   handle.handle,slowcoord,fastcoord,coordx,coordy,coordz)
+    cbf_error(err_no, extra = "while getting pixel coordinate $slowcoord,$fastcoord")
+    return coordx[],coordy[],coordz[]
+end
+
 """
     imgload(filename,::Val{:CBF})
 
@@ -501,13 +517,18 @@ imgload(filename::AbstractString,::Val{:CBF};path=nothing,frame=nothing) = begin
 end
 
 """
-    get_beam_centre(filename,scan,frame)
+    prepare_detector(filename,scan,frame)
 
-Return the beam centre for `frame` in `scan`, taking into account all
-axis positions.
+Return a CBF detector object (`det_handle`) and detector information `det_data`
+ ready for calculations positioned according
+to `frame` of `scan`. `scan` and `frame` may be omitted in which case the
+zero settings are used.
+
+ `destruct_detector` must be called when the detector is no longer used.
+The `det_data` item returned must be preserved from garbage collection until
+the returned handle is no longer needed.
 """
-get_beam_centre(filename::AbstractString,args...) = begin
-
+prepare_detector(filename,args...) = begin
     # determine axis settings for scan
 
     axis_names,types,postns = get_detector_axis_settings(filename,args...)
@@ -538,16 +559,52 @@ get_beam_centre(filename::AbstractString,args...) = begin
                    handle.handle,det_handle,0)
     cbf_error(err_no, extra = "while constructing detector")
     @debug "Det info is: $det_data"
-    centre1,centre2,index1,index2 = cbf_get_beam_center(det_handle)
-    GC.@preserve det_data err_no = ccall((:cbf_free_detector,libcbf),Cint,
+    return det_handle,det_data
+end
+
+destruct_detector(det_handle) = begin
+    err_no = ccall((:cbf_free_detector,libcbf),Cint,
                                    (Ptr{CBF_Detector_Struct},),det_handle.handle)
     cbf_error(err_no, extra = "while destructing detector")
+end
+
+"""
+    get_beam_centre(filename,scan,frame)
+
+Return the beam centre for `frame` in `scan`, taking into account all
+axis positions. We return `det_data` as must be preserved until the
+handle is destroyed.
+"""
+get_beam_centre(filename::AbstractString,args...) = begin
+
+    det_handle, det_data = prepare_detector(filename,args...)    
+    centre1,centre2,index1,index2 = cbf_get_beam_center(det_handle)
+    GC.@preserve det_data destruct_detector(det_handle)
+    
     return centre1,centre2,index1,index2
 
 end
 
 get_beam_centre(incif::CifContainer,args...) = begin
     get_beam_centre("$(incif.original_file)",args...)
+end
+
+"""
+   get_pixel_coordinates(incif::CifContainer,fast_coord,slow_coord,scan,frame)
+
+Return the coordinates in lab space of the nominated pixel, with axes oriented
+as for `frame` in `scan`. `scan` and `frame` are optional.
+"""
+get_pixel_coordinates(filename::AbstractString,slow_coord,fast_coord,args...) = begin
+    dh, dd = prepare_detector(filename,args...)
+    x,y,z = cbf_get_pixel_coordinates(dh,slow_coord,fast_coord)
+    GC.@preserve dd destruct_detector(dh)
+    return [x,y,z]
+end
+
+get_pixel_coordinates(incif::CifContainer,args...) = begin
+    filename = incif.original_file
+    get_pixel_coordinates(filename,args...)
 end
 
 cbf_error(val;extra="") = begin

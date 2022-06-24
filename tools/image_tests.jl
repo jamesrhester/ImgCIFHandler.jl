@@ -7,8 +7,10 @@ Pkg.instantiate()
 
 using ImgCIFHandler#main
 using ImageInTerminal, Colors,ImageContrastAdjustment
+using ImageTransformations
 using ArgParse
 using CrystalInfoFramework,FilePaths,URIs, Tar, Images
+using Luxor
 
 # Tests for imgCIF files
 const test_list = []
@@ -82,6 +84,9 @@ end
         if !haskey(incif,ic)
             push!(messages,(false,"Required item $ic is missing"))
         end
+        if any(x->ismissing.(x),incif[ic])
+            push!(messages,(false,"At least one value for required item $ic is missing"))
+        end
     end
     return messages
 end
@@ -121,6 +126,17 @@ end
             push!(messages,(false,"Undefined axes in $tv: $unk"))
         end
     end
+
+    # Check that axes have a length
+
+    vs = getindex.(Ref(incif),["_axis.id","_axis.vector[1]","_axis.vector[2]","_axis.vector[3]"])
+    for (nm,v1,v2,v3) in zip(vs...)
+        v = parse.(Float64,[v1,v2,v3])
+        if v[1]^2 + v[2]^2 + v[3]^2 <= 0
+            push!(messages,(false,"Axis vector for $nm has length <= 0"))
+        end
+    end
+
     return messages
 end
 
@@ -542,9 +558,17 @@ verdict(msg_list) = begin
 end
 
 """
-Display an image in the terminal
+    create_check_image(incif,im;logscale=true,cut_ratio=1000)
+
+Create a correctly oriented image from the matrix `im` using geometry 
+information in `incif`. We want the top
+left of the image to be the top left of the detector looking from the
+sample position. Returns the image and the rotation of the original.
 """
-display_check_image(im;logscale=true,cut_ratio=1000) = begin
+create_check_image(incif,im;logscale=true,cut_ratio=1000) = begin
+    
+    # First try to improve contrast
+    
     #alg = Equalization(nbins=256,maxval = floor(maximum(im)/10))
     if maximum(im) > 1.0
         im = im/maximum(im)
@@ -552,26 +576,75 @@ display_check_image(im;logscale=true,cut_ratio=1000) = begin
     clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
     alg = LinearStretching(src_maxval = clamp_high)
     im_new = adjust_histogram(im,alg)
-    println("Image for checking")
-    #println("Max, min for adjusted image: $(maximum(im_new)), $(minimum(im_new))\n")
-    imshow(Gray.(im_new))
-    println("\n")
-    return im_new
+    @debug "Max, min for adjusted image:" maximum(im_new) minimum(im_new)
+
+    # Adjust geometry if we know gravity
+
+    if !("gravity" in incif["_axis.equipment"]) return im_new,0 end
+
+    gravity = indexin(["gravity"],incif["_axis.equipment"])[]
+    grav_vec = parse.(Float64,
+                      [
+                          incif["_axis.vector[1]"][gravity],
+                          incif["_axis.vector[2]"][gravity],
+                          incif["_axis.vector[3]"][gravity],
+                      ]
+                      )
+    norm_grav = sqrt(grav_vec[1]^2+grav_vec[2]^2)
+    grav_vec = grav_vec/norm_grav
+    
+    corner_loc = get_pixel_coordinates(incif,0,0)
+    fast_dir = get_pixel_coordinates(incif,0,1) - corner_loc
+
+    norm_fast = sqrt(fast_dir[1]^2+fast_dir[2]^2)
+    fast_dir = fast_dir/norm_fast
+
+    # Make "down" (PNG fast direction) in direction of gravity.
+    
+    # Assume square pixels. We want rotation matrix
+    # R[theta][fast_x,fast_y] = [grav_x,grav_y]
+    # where one of grav_x,grav_y = 0 and we require one of the
+    # components of fast to be basically zero
+    #
+    # So fast_x * cos theta +fast_y*sin theta  = grav_x
+    # -sin theta * fast_x +  fast_y * cos_theta = grav_y
+    #
+
+    # Simplest is just to try the 4 possible rotations
+
+    rot = nothing
+    for r in (0,90,180,270)
+        try_x = fast_dir[1]*cosd(r) + fast_dir[2]*sind(r)
+        try_y = -fast_dir[1]*sind(r) + fast_dir[2]*cosd(r)
+        if isapprox(try_x,grav_vec[1],atol=0.1) && isapprox(try_y,grav_vec[2],atol=0.1)
+            rot = r
+            @debug "Image rotated by " rot
+            break
+        end
+    end
+
+    if rot == nothing
+        println("Warning: unable to rotate image to match gravity")
+        rot = 0
+    end
+
+    imrotate!(im_new,rot*pi/180)
+    
+    return im_new,rot
 end
 
-"""
-Save an image
-"""
-save_check_image(im,imfn;logscale=true,cut_ratio=1000) = begin
+annotate_check_image(im, rot) = begin
     
-    if maximum(im) > 1.0
-        im = im/maximum(im)
+end
+
+show_check_image(im;savefn=nothing) = begin
+    if savefn != nothing
+        save(imfn, im)
+    else
+        println("Image for checking")
+        imshow(Gray.(im))
+        println("\n")
     end
-    clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
-    alg = LinearStretching(src_maxval = clamp_high)
-    im_new = adjust_histogram(im,alg)
-    save(imfn, im_new)
-    return im_new
 end
 
 """
@@ -620,7 +693,14 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
     println("="^40*"\n")
     for (desc,one_test) in test_list
         print("\nTesting: $desc: ")
-        ok = ok & verdict(one_test(incif))
+        res = []
+        try
+            res = one_test(incif)
+        catch e
+            @debug "Error during test" e
+            res = [(false,"Unable to carry out test, assume missing or bad value")]
+        end
+        ok = ok & verdict(res)
     end
     testimage = [[]]  # for consistency
 
@@ -658,13 +738,18 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
             verdict([(false,"Unable to access image $load_id: $e")])
             rethrow()
         end
+
+        # Output an image
         
+        new_im,rot = create_check_image(incif,testimage,logscale=false)
+        imgfn = nothing
         if savepng
-            imgfn=string(incif.original_file,".png") 
-            save_check_image(testimage, imgfn, logscale=false)
-        else
-            display_check_image(testimage,logscale=false)
+            imgfn=string(incif.original_file,".png")
         end
+        
+        show_check_image(new_im; savefn=imgfn)
+
+        # Run the image checks
         
         for (desc,one_test) in test_list_with_img
             print("\nTesting image $load_id: $desc: ")
@@ -732,7 +817,7 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     parsed_args = parse_cmdline("Check contents of imgCIF files")
     #println("$parsed_args")
-    incif = Cif(Path(parsed_args["filename"]))
+    incif = Cif(FilePaths.Path(parsed_args["filename"]))
     if isnothing(parsed_args["blockname"])
         blockname = first(incif).first
     else

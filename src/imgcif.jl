@@ -94,3 +94,13 @@ get_gonio_axes(imgcif::CifContainer) = begin
 
     return gonio_axes,String.(filt_axis[!,"_axis.type"])
 end
+
+"""
+    get_surface_axes(imgcif::CifContainer)
+
+Return the axes describing the detector surface together with the origin
+in X,Y coordinates
+"""
+get_surface_axes(imgcif::CifContainer) = begin
+    
+end
