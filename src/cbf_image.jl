@@ -603,7 +603,7 @@ get_pixel_coordinates(filename::AbstractString,slow_coord,fast_coord,args...) = 
 end
 
 get_pixel_coordinates(incif::CifContainer,args...) = begin
-    filename = incif.original_file
+    filename = "$(incif.original_file)"
     get_pixel_coordinates(filename,args...)
 end
 
