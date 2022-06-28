@@ -98,9 +98,17 @@ end
 """
     get_surface_axes(imgcif::CifContainer)
 
-Return the axes describing the detector surface together with the origin
-in X,Y coordinates
+Return the axis names describing the detector surface and return in order
+fast,slow
 """
-get_surface_axes(imgcif::CifContainer) = begin
-    
+get_surface_axes(incif::CifContainer) = begin
+    names = incif["_array_structure_list_axis.axis_id"]
+    # assume no fancy multi-axis detector pixel directions
+    axis_sets = incif["_array_structure_list_axis.axis_set_id"]
+    precedence = parse.(Int64,incif["_array_structure_list.precedence"])
+    prec_axis_set = incif["_array_structure_list.axis_set_id"]
+    speeds = indexin([1,2],precedence)
+    axis_id = prec_axis_set[speeds]
+    axis_name_ind = indexin(axis_id,axis_sets)
+    fast,slow = String.(names[axis_name_ind])
 end

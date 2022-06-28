@@ -390,7 +390,7 @@ end
 """
     peek_image(URI,archive_type,cif_block::CifContainer;entry_no=0)
 
-Find the name of the first image in archive of type `archive_type` at `URL`, searching
+Find the name of an image in archive of type `archive_type` at `URL`, searching
 from entry number `entry_no`,and check that this image is available in `cif_block`
 if `check_name` is true.
 """
@@ -437,5 +437,51 @@ peek_image(uri::URI,arch_type,cif_block::CifContainer;entry_no=0,check_name=true
 end
 
 peek_image(u::URI,arch_type) = peek_image(u,arch_type,Block{String}())  #for testing
+
+"""
+    scan_frame_from_img_name(u,name,cif_block)
+
+Return the scan_id, frame_id for the given `name` at URL `u` according to contents
+of `cif_block`. If `name` is `nothing`, `u` must point to a single frame. If `cif_block`
+contains no scan or frame information, (nothing,1) is returned.
+"""
+scan_frame_from_img_name(u,name,cif_block) = begin
+    ext_loop = get_loop(cif_block,"_array_data_external_data.id")
+    fel = filter(row->row["_array_data_external_data.uri"] == u,ext_loop,view=true)
+    if size(fel,1) == 0 throw(error("$u not found in cif block")) end
+    if name != nothing
+        fel = filter(row->row["_array_data_external_data.archive_path"]==name,fel,view=true)
+    end
+    if size(fel,1) != 1
+        throw(error("$u $name does not correspond to a single frame (got $(size(fel,1)) answers)"))
+    end
+
+    # now find the frame number external_id -> binary_id -> frame_id -> frame_no
+
+    ext_id = fel[!,"_array_data_external_data.id"][]
+    array_loop = filter(row->row["_array_data.external_data_id"]==ext_id,
+                      get_loop(cif_block,"_array_data.binary_id"),view=true)
+    bin_id = array_loop[!,"_array_data.binary_id"][]
+
+    # assume that frame_id is globally unique, not per scan
+    
+    frame_loop = filter(row->row["_diffrn_data_frame.binary_id"]==bin_id,
+                      get_loop(cif_block,"_diffrn_data_frame.id"),view=true)
+    frame_id = frame_loop[!,"_diffrn_data_frame.id"][]
+
+    # get scan id
+    
+    scan_loop = filter(row->row["_diffrn_scan_frame.frame_id"]==frame_id,
+                       get_loop(cif_block,"_diffrn_scan_frame.frame_id"), view=true)
+    if !haskey(cif_block,"_diffrn_scan.id")
+        scan_id = nothing
+    elseif length(cif_block["_diffrn_scan.id"])==1
+        scan_id = cif_block["_diffrn_scan.id"][]
+    else
+        scan_id = scan_loop[!,"_diffrn_scan_frame.scan_id"][]
+    end
+    frame_no = scan_loop[!,"_diffrn_scan_frame.frame_number"][]
+    return scan_id,parse(Int64,frame_no)
+end
 
 end

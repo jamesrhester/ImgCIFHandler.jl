@@ -227,7 +227,8 @@ end
     end
 
     for or in eachrow(actual)
-        if ismissing(getproperty(or,cn*"displacement_range"))
+        dr = getproperty(or,cn*"displacement_range")
+        if isnothing(dr) || ismissing(dr)  #really should not allow missing
             stem = "angle_"
         else
             stem = "displacement_"
@@ -447,40 +448,75 @@ const img_types = Dict(UInt8 =>"unsigned 8-bit integer",
     return messages
 end
 
-#######################################################################################
-#
 #             Check the full archive
-#
-#######################################################################################
+
 """
-    Download all archives listed in `incif`, returning a dictionary {url -> local file}.
-    If `get_full` is false, just start the download and abort as soon as a file is found.
-    `subs` is a dictionary of local file equivalents to urls.
+    download_uris(incif;subs=Dict)
+
+    Download uris from `incif` to local files, where `subs` contains
+    local file equivalents to urls {url -> local file}
 """
-download_archives(incif;get_full=false,pick=1,subs=Dict()) = begin
-    urls = unique(incif["_array_data_external_data.uri"])
-    if !isempty(subs)
-        for u in urls
-            if !(u in keys(subs))
-                throw(error("No local file substitution found for $u; have $(keys(subs)) only"))
-            end
-        end
-        if get_full return subs end
-    end
+download_uris(incif;subs=Dict())= begin
+
     result_dict = Dict{String,String}()
+
+    # Get all referenced URIs
+    
+    urls = unique(incif["_array_data_external_data.uri"])
+
+    # If we have local substitutes, make sure they cover all uris found
+    
     for u in urls
+        if u in keys(subs)
+            result_dict[u] = URI("file://"*subs[u])
+            continue
+        end
+        loc = URI(make_absolute_uri(incif,u))
+        result_dict[u] = Downloads.download(loc)
+    end
+
+    return result_dict
+end
+
+"""
+    get_archive_member_name(incif;pick=1,subs=Dict())
+
+    For each distinct URI in `incif`, return the name of a member file that is listed
+    in `incif`. `subs` is a dictionary of local file equivalents to urls. `pick`
+    selects the nth member of the archive instead of the first.
+"""
+get_archive_member_name(incif;pick=1,subs=Dict()) = begin
+
+    # Get all referenced URIs
+    
+    urls = unique(incif["_array_data_external_data.uri"])
+
+    result_dict = Dict{String,String}()
+
+    # Cycle through URIs, looking either for everything or one thing
+    
+    for u in urls
+
+        # Construct actual URI
+        
         if !isempty(subs)
             loc = URI("file://"*subs[u])
         else
             loc = URI(make_absolute_uri(incif,u))
         end
+
+        # Find archive type
+        
         pos = indexin([u],incif["_array_data_external_data.uri"])[]
         arch_type = nothing
         if haskey(incif,"_array_data_external_data.archive_format")
             arch_type = incif["_array_data_external_data.archive_format"][pos]
         end
+
+        # Extract a single file if we have an archive
+        
         x = ""
-        if !get_full && arch_type in ("TBZ","TGZ","TAR")
+        if arch_type in ("TBZ","TGZ","TAR")
             try
                 x = peek_image(loc,arch_type,incif,check_name=false,entry_no=pick)
             catch exn
@@ -488,12 +524,15 @@ download_archives(incif;get_full=false,pick=1,subs=Dict()) = begin
             end
             @debug "Got $x for $u"
             result_dict[u] = x == nothing ? "" : x
-        elseif get_full
-            result_dict[u] = Downloads.download(u)
+        elseif arch_type === nothing  #u is the whole frame
+            result_dict[u] = u
         else
             @warn "Partial downloading not available for $u: try full downloading with option -f"
         end
     end
+
+    # result_dict links uri to a filename, which is contained in that uri
+
     return result_dict     
 end
 
@@ -511,40 +550,37 @@ end
     messages = []
 end
 
-##############
-#
+
 #   Utility routines
-#
-##############
 
 """
-    Find an image ID that is available in the archive. `archive_list` is
+    Find an image ID that is obtainable. `archive_list` is
     a dictionary of URI -> item pairs where `item` is an archive member
-    if have_full is false, or else it is an entire archive otherwise. 
+    or the URI itself if the URI is a complete frame.
 """
-find_load_id(incif,archive_list,have_full) = begin
+find_load_id(incif,archive_list) = begin
 
-    known_paths = incif["_array_data_external_data.archive_path"]
+    external_info = get_loop(incif,"_array_data_external_data.id")
+    known_uris = unique(incif["_array_data_external_data.uri"])
+    if haskey(incif,"_array_data_external_data.archive_path")
+        known_paths = incif["_array_data_external_data.archive_path"]
+    else
+        known_paths = known_uris
+    end
     
     # First see if our frame is in the file
 
-    if !have_full
-        @debug archive_list
-        for (k,v) in archive_list
-            if v in known_paths
-                pos = indexin([v],known_paths)[]
-                # a level of indirection
-                ext_data_id = incif["_array_data_external_data.id"][pos]
-                vv = incif["_array_data.external_data_id"]
-                pos = indexin([ext_data_id],vv)[]
-                return incif["_array_data.binary_id"][pos]
-            end
+    @debug archive_list
+    for (k,v) in archive_list
+        if v in known_paths
+            pos = indexin([v],known_paths)[]
+            # a level of indirection
+            ext_data_id = incif["_array_data_external_data.id"][pos]
+            vv = incif["_array_data.external_data_id"]
+            pos = indexin([ext_data_id],vv)[]
+            return incif["_array_data.binary_id"][pos]
         end
-
-        throw(error("Sample image not found, try full archive (option -f)"))
     end
-
-    # Get a list of all archive members
     
 end
 
@@ -561,8 +597,9 @@ end
     create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true)
 
 Create a contrast enhanced image from the matrix `im`. If `gravity` is true, 
-information in `incif` is used, if available, to rotate the image so that down on the image 
-becomes down in real space. Returns the image and the rotation of the original.
+information in `incif` is used, if available, to calculate the rotation
+of the image so that down on the image 
+becomes down in real space. Returns the unrotated image and the rotation.
 """
 create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
     
@@ -618,7 +655,7 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
         try_y = -fast_dir[1]*sind(r) + fast_dir[2]*cosd(r)
         if isapprox(try_x,grav_vec[1],atol=0.1) && isapprox(try_y,grav_vec[2],atol=0.1)
             rot = d
-            @debug "Image rotated by " rot*90
+            @debug "Image should be rotated by " rot*90
             break
         end
     end
@@ -628,23 +665,96 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
         rot = 0
     end
 
-    im_new = rotl90(im_new,rot)
+    #im_new = rotl90(im_new,rot)
     
     return im_new,rot*90
 end
 
-annotate_check_image(im, rot) = begin
+"""
+    annotate_check_image(image,rotation,beam_centre,names,filename; border=30)
+
+Add axes and beam centre to `image`, saving the result in
+`filename`. `names` contains the names of the fast and slow
+axes, in that order. `border` is the size of the border around
+the image.
+"""
+annotate_check_image(im, rot, incif;border=30) = begin
+
+    # Rotate the image
+
+    im_new = rotl90(im,div(rot,90))
+
+    # Get the beam centre
+
+    _,_,slow,fast = get_beam_centre(incif)
+    fast,slow = get_surface_axes(incif)
     
+    fast,slow=names
+
+    # TODO: scale to useful size
+    
+    width = size(im_new,1)
+    height = size(im_new,2)
+
+    # Start the drawing
+    
+    Luxor.Drawing(width,height, :rec)
+    placeimage(im_new,border,border)
+    #
+    # draw a square for the beam centre
+    #
+    setcolor("red")
+    box(Point(slow+border,fast+border),4,4,:fill)
+    draw_axes(height,width,rot,get_axis_names(cc))
 end
 
-show_check_image(im;savefn=nothing) = begin
-    if savefn != nothing
-        save(savefn, Gray.(im))
+draw_axes(height,width,angle,names;border=30) = begin
+    fast,slow = names
+    # rotate and origin to corner
+    origin()
+    rotate(deg2rad(angle))
+    translate(Point(-(width+border)/2,-(height+border)/2))
+    # draw some lines
+
+    setcolor("black")
+    # rulers()
+    # The X coordinate is across (i.e. the slow png direction)
+    arrow(O,Point(width/2,0))
+    # And Y is down (i.e. the fast png direction)
+    arrow(O,Point(0,(height/2.0)))
+
+    # annotate the lines
+    translate(Point(width/4.0,0))
+
+    # switch the label on the bottom to get the text upright
+    if angle == 180 # slow axis on bottom
+	rotate(pi)
+	label(slow,:N)
+	rotate(pi)
     else
-        println("Image for checking")
-        imshow(Gray.(im))
-        println("\n")
+	label(slow,:S)
     end
+    translate(Point(-width/4.0,height/4.0))
+    if angle == 270
+	rotate(pi/2)
+	label(fast,:N)
+	rotate(-pi/2)
+    else
+	rotate(-pi/2)
+	label(fast,:S)
+    end
+end
+
+show_check_image(im::AbstractArray,rot) = begin
+    #if savefn != nothing
+
+        # Full annotated image
+        
+        #save(savefn, Gray.(im))
+    #else
+    println("Image for checking")
+    imshow(Gray.(rotl90(im,div(rot,90))))
+    println("\n")
 end
 
 """
@@ -709,8 +819,12 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
     # Test archive access
 
     println("Testing presence of archive:")
+
+    if full
+        subs = download_uris(incif,subs)
+    end
     
-    all_archives = download_archives(incif;get_full=full,pick=pick,subs=subs)
+    all_archives = get_archive_member_name(incif;pick=pick,subs=subs)
 
     print("\nTesting: All archives are accessible: ")
     
@@ -725,14 +839,10 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
         # Choose image to load
 
-        load_id = find_load_id(incif,all_archives,full)
+        load_id = find_load_id(incif,all_archives)
         
         try
-            if full
-                testimage = imgload(incif,load_id;local_version=all_archives)
-            else
-                testimage = imgload(incif,load_id;local_version=subs)
-            end
+            testimage = imgload(incif,load_id;local_version=subs)
         catch e
             @debug e
             verdict([(false,"Unable to access image $load_id: $e")])
@@ -744,11 +854,12 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         new_im,rot = create_check_image(incif,testimage,logscale=false)
         imgfn = nothing
         if savepng
-            imgfn=string(incif.original_file,".png")
-        end
-        
-        show_check_image(new_im; savefn=imgfn)
+            #imgfn=string(incif.original_file,".png")
+            annotate_check_image(new_im,rot,incif)
 
+        else
+            show_check_image(new_im,rot)
+        end
         # Run the image checks
         
         for (desc,one_test) in test_list_with_img

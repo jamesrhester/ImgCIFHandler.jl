@@ -23,9 +23,9 @@ _diffrn_radiation.type     'Synchrotron X-ray Source'
       _axis.offset[3]
          phi        rotation  goniometer  chi  -1.0 -0.0037 -0.002  0  0  0
          chi        rotation  goniometer  omega  0.0046 0.0372 0.9993  0  0  0
-         omega      rotation  goniometer  .  -1.0 0.0 0.0  0  0  0
+         omega      rotation  goniometer  .  1.0 0.0 0.0  0  0  0
          gravity    general   gravity     .  0.0 1.0 0.0  0  0  0
-         two_theta  rotation     detector    .          -1   0  0   0  0  0
+         two_theta  rotation     detector    .           1   0  0   0  0  0
          trans      translation  detector    two_theta  0   0  -1   0  0  287.2224260231453
          detx       translation  detector    trans      1   0  0  -166.87  172.47 0
          dety       translation  detector    detx      0  -1  0   0  0.0  0
@@ -36,8 +36,8 @@ _diffrn_radiation.type     'Synchrotron X-ray Source'
       _array_structure_list_axis.start
       _array_structure_list_axis.displacement_increment
       _array_structure_list_axis.displacement
-         detx                    1                    0                  0.075   0
-         dety                    2                    0                  0.075   0
+         detx                    1                    0                  0.075   0.0375
+         dety                    2                    0                  0.075   0.0375
 
     loop_
       _array_structure_list.array_id

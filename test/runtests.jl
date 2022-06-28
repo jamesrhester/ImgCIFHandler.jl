@@ -1,9 +1,13 @@
 # Test
 using ImgCIFHandler
+using CrystalInfoFramework
+using FilePaths
 using Test
 using URIs
 
 const b4master = joinpath(@__DIR__,"testfiles/b4_master.cif")
+const b4master_rem = joinpath(@__DIR__,"testfiles/b4_master_remote.cif")
+const multi_scan = joinpath(@__DIR__,"testfiles/all_scans.cif")
 
 extract_files() = begin
     # Uncompress archive
@@ -78,6 +82,22 @@ end
 @testset "Test beam centre calculation" begin
     c1,c2,i1,i2 = get_beam_centre(b4master)
     @test isapprox(c1, 172.4595, atol= 0.0001)
+end
+
+@testset "Test scan, frame no extraction" begin
+    bb = first(Cif(Path(b4master))).second
+    s,f = ImgCIFHandler.scan_frame_from_img_name("test_cbf_unzipped/s01f0003.cbf",nothing,bb)
+    println("$s,$f")
+    @test s == "SCAN1" && f == 3
+    bb = first(Cif(Path(b4master_rem))).second
+    uri = "https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2"
+    s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"s01f0014.cbf",bb)
+    @test s == "SCAN1" && f == 14
+    bb = first(Cif(Path(multi_scan))).second
+    uri = "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
+    s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"m0220c_02_0171.cbf",bb)
+    @test s == "SCAN02" && f == 171
+
 end
 
 
