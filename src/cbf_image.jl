@@ -573,15 +573,15 @@ end
 
 Return the beam centre for `frame` in `scan`, taking into account all
 axis positions. We return `det_data` as must be preserved until the
-handle is destroyed.
+handle is destroyed. Order of coordinates is slow direction, fast dir.
 """
 get_beam_centre(filename::AbstractString,args...) = begin
 
     det_handle, det_data = prepare_detector(filename,args...)    
-    centre1,centre2,index1,index2 = cbf_get_beam_center(det_handle)
+    centre1,centre2,slow,fast = cbf_get_beam_center(det_handle)
     GC.@preserve det_data destruct_detector(det_handle)
     
-    return centre1,centre2,index1,index2
+    return centre1,centre2,slow,fast
 
 end
 

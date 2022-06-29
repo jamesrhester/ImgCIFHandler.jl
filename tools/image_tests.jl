@@ -642,8 +642,8 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
     # where one of grav_x,grav_y = 0 and we require one of the
     # components of fast to be basically zero
     #
-    # So fast_x * cos theta +fast_y*sin theta  = grav_x
-    # -sin theta * fast_x +  fast_y * cos_theta = grav_y
+    # So fast_x * cos theta  -fast_y*sin theta  = grav_x
+    # sin theta * fast_x +  fast_y * cos_theta = grav_y
     #
 
     # Simplest is just to try the 4 possible rotations
@@ -651,8 +651,8 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
     rot = nothing
     for d in 0:3
         r=d*90
-        try_x = fast_dir[1]*cosd(r) + fast_dir[2]*sind(r)
-        try_y = -fast_dir[1]*sind(r) + fast_dir[2]*cosd(r)
+        try_x = fast_dir[1]*cosd(r) - fast_dir[2]*sind(r)
+        try_y = fast_dir[1]*sind(r) + fast_dir[2]*cosd(r)
         if isapprox(try_x,grav_vec[1],atol=0.1) && isapprox(try_y,grav_vec[2],atol=0.1)
             rot = d
             @debug "Image should be rotated by " rot*90
@@ -678,52 +678,82 @@ Add axes and beam centre to `image`, saving the result in
 axes, in that order. `border` is the size of the border around
 the image.
 """
-annotate_check_image(im, rot, incif;border=30) = begin
+annotate_check_image(im, rot, incif;border=30,scan_id=nothing,frame_no=nothing) = begin
 
-    # Rotate the image
+    width_slow = size(im,2)
+    height_fast = size(im,1)   #in display, height is fast direction
+    
+    # Rotate the image matrix
 
     im_new = rotl90(im,div(rot,90))
-
+    
     # Get the beam centre
 
-    _,_,slow,fast = get_beam_centre(incif)
-    fast,slow = get_surface_axes(incif)
-    
-    fast,slow=names
+    if isnothing(scan_id)
+        _,_,slow_c,fast_c = get_beam_centre(incif)
+    else
+        _,_,slow_c,fast_c = get_beam_centre(incif,scan_id,frame_no)
+    end
+    fast_n,slow_n = get_surface_axes(incif)
 
+    # Transform beam centre coordinates
+
+    slow_c = slow_c - width_slow/2
+    fast_c = fast_c - height_fast/2
+    new_slow_c = cosd(rot)* slow_c + sind(rot)* fast_c
+    new_fast_c = -sind(rot)* slow_c + cosd(rot)* fast_c
+    new_slow_c = new_slow_c + width_slow/2
+    new_fast_c = new_fast_c + height_fast/2
+                             
     # TODO: scale to useful size
     
-    width = size(im_new,1)
-    height = size(im_new,2)
+    width = size(im_new,2)   #slow direction
+    height = size(im_new,1)  #fast direction
 
     # Start the drawing
     
-    Luxor.Drawing(width,height, :rec)
-    placeimage(im_new,border,border)
-    #
+    Luxor.Drawing(2*width+border*4,height+border*2+20, :rec)
+    background("white")
+
+    # Place rotated and original images
+
+    placeimage(Gray.(im_new),Point(border,border))
+    placeimage(Gray.(im),Point(border*3 + width,border))
+    setcolor("black")
+    label("Laboratory frame",0,Point(border+width/2,border*2+height+10))
+    label("Original",0,Point(border*3+3*width/2,border*2+height+10))
+    
     # draw a square for the beam centre
-    #
+    
     setcolor("red")
-    box(Point(slow+border,fast+border),4,4,:fill)
-    draw_axes(height,width,rot,get_axis_names(cc))
+    box(Point(new_slow_c+border,new_fast_c+border),4,4,:fill)
+    draw_axes(height,width,rot,(fast_n,slow_n))
+    snapshot(fname="$(incif.original_file)"*".png")
 end
 
 draw_axes(height,width,angle,names;border=30) = begin
     fast,slow = names
+    @debug "Fast, slow axis names" fast slow
+    @debug "Rotate a/c wise by " angle
+    
     # rotate and origin to corner
-    origin()
-    rotate(deg2rad(angle))
+    origin(width/2+border,height/2+border)
+    rotate(deg2rad(-1*angle))
     translate(Point(-(width+border)/2,-(height+border)/2))
     # draw some lines
 
     setcolor("black")
-    # rulers()
+    
     # The X coordinate is across (i.e. the slow png direction)
+
     arrow(O,Point(width/2,0))
+
     # And Y is down (i.e. the fast png direction)
+
     arrow(O,Point(0,(height/2.0)))
 
     # annotate the lines
+
     translate(Point(width/4.0,0))
 
     # switch the label on the bottom to get the text upright
@@ -735,7 +765,8 @@ draw_axes(height,width,angle,names;border=30) = begin
 	label(slow,:S)
     end
     translate(Point(-width/4.0,height/4.0))
-    if angle == 270
+    if angle == 90  # fast on bottom
+        @debug "Rotating $fast"
 	rotate(pi/2)
 	label(fast,:N)
 	rotate(-pi/2)
@@ -746,12 +777,6 @@ draw_axes(height,width,angle,names;border=30) = begin
 end
 
 show_check_image(im::AbstractArray,rot) = begin
-    #if savefn != nothing
-
-        # Full annotated image
-        
-        #save(savefn, Gray.(im))
-    #else
     println("Image for checking")
     imshow(Gray.(rotl90(im,div(rot,90))))
     println("\n")
@@ -855,8 +880,8 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         imgfn = nothing
         if savepng
             #imgfn=string(incif.original_file,".png")
-            annotate_check_image(new_im,rot,incif)
-
+            scan_id,frame_no = ImgCIFHandler.scan_frame_from_ext_id(load_id,incif)
+            annotate_check_image(new_im,rot,incif,scan_id=scan_id,frame_no=frame_no)
         else
             show_check_image(new_im,rot)
         end
@@ -935,7 +960,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-06-28\n")
+    println("\n ImgCIF checker version 2022-06-29\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end

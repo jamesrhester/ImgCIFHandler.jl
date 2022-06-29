@@ -35,6 +35,7 @@ export get_detector_axis_settings #Get axis settings for particular frame
 export get_beam_centre
 export get_gonio_axes
 export get_pixel_coordinates
+export get_surface_axes #get the axes used to locate pixels on the detector
 
 include("hdf_image.jl")
 include("cbf_image.jl")
@@ -459,6 +460,17 @@ scan_frame_from_img_name(u,name,cif_block) = begin
     # now find the frame number external_id -> binary_id -> frame_id -> frame_no
 
     ext_id = fel[!,"_array_data_external_data.id"][]
+    return scan_frame_from_ext_id(ext_id,cif_block)
+end
+
+"""
+    scan_frame_from_ext_id(external_id,cif_block)
+
+Return the scan_id, frame_id for the given `external_id` according to contents
+of `cif_block`. If `cif_block` contains no scan or frame information, 
+(nothing,1) is returned.
+"""
+scan_frame_from_ext_id(ext_id,cif_block) = begin
     array_loop = filter(row->row["_array_data.external_data_id"]==ext_id,
                       get_loop(cif_block,"_array_data.binary_id"),view=true)
     bin_id = array_loop[!,"_array_data.binary_id"][]
@@ -483,5 +495,7 @@ scan_frame_from_img_name(u,name,cif_block) = begin
     frame_no = scan_loop[!,"_diffrn_scan_frame.frame_number"][]
     return scan_id,parse(Int64,frame_no)
 end
+
+
 
 end
