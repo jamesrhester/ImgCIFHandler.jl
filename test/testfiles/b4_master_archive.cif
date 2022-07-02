@@ -1,0 +1,112 @@
+data_test1
+_audit.block_id	Diamond_I04
+_diffrn_source.beamline	I04
+_diffrn_source.facility	Diamond
+
+    _array_structure.byte_order         LITTLE_ENDIAN
+    _array_structure.compression_type   "x-CBF_BYTE_OFFSET"
+    _array_structure.encoding_type      BINARY
+
+   _diffrn_radiation.type     'Synchrotron X-ray Source'
+ 
+ loop_
+      _diffrn_radiation_wavelength.id
+      _diffrn_radiation_wavelength.value
+       1          0.9794913928630679
+
+    loop_
+      _axis.id
+      _axis.type
+      _axis.equipment
+      _axis.depends_on
+      _axis.vector[1]
+      _axis.vector[2]
+      _axis.vector[3]
+      _axis.offset[1]
+      _axis.offset[2]
+      _axis.offset[3]
+         phi        rotation  goniometer  chi  -1.0 -0.0037 -0.002  0  0  0
+         chi        rotation  goniometer  omega  0.0046 0.0372 0.9993  0  0  0
+         omega      rotation  goniometer  .   1.0 0.0 0.0  0  0  0
+         gravity    general   gravity     .   1.0 0.0 0.0  0  0  0
+         two_theta  rotation     detector    .          1   0  0   0  0  0
+         trans      translation  detector    two_theta  0   0  -1   0  0  0 
+         detx       translation  detector    trans      1   0  0  -166.8  172.497  0
+         dety       translation  detector    detx       0  -1  0   0  0  0
+
+    loop_
+      _array_structure_list_axis.axis_id
+      _array_structure_list_axis.axis_set_id
+      _array_structure_list_axis.start
+      _array_structure_list_axis.displacement_increment
+      _array_structure_list_axis.displacement
+         detx                    1                    0                  0.075   0.0375
+         dety                    2                    0                  0.075   0.0375
+
+    loop_
+      _array_structure_list.array_id
+      _array_structure_list.axis_set_id
+      _array_structure_list.direction
+      _array_structure_list.index
+      _array_structure_list.precedence
+      _array_structure_list.dimension
+         1             1             increasing             1             1       4148
+         1             2             increasing             2             2       4362
+
+    loop_
+      _diffrn_detector.id
+      _diffrn_detector.number_of_axes
+         det1                        1
+
+    loop_
+      _diffrn_detector_axis.axis_id
+      _diffrn_detector_axis.detector_id
+         trans                    det1
+
+    loop_
+      _array_data.array_id
+      _array_data.binary_id
+      _array_data.external_data_id
+1    1     1  
+1    2     2  
+1    3     3  
+
+    loop_
+      _array_data_external_data.id
+      _array_data_external_data.format
+      _array_data_external_data.uri
+      _array_data_external_data.archive_format
+      _array_data_external_data.archive_path
+    1    CBF b4_mini.tar.bz2 TBZ s01f0001.cbf
+    2    CBF b4_mini.tar.bz2 TBZ s01f0002.cbf
+    3    CBF b4_mini.tar.bz2 TBZ s01f0003.cbf
+
+    loop_
+      _diffrn_data_frame.id
+      _diffrn_data_frame.binary_id
+      _diffrn_data_frame.array_id
+           1 1    1
+           2 2    1
+           3 3    1
+
+    _diffrn_scan.id SCAN1
+    _diffrn_scan.frames                      3
+loop_
+    _diffrn_scan_axis.axis_id               
+    _diffrn_scan_axis.scan_id               
+    _diffrn_scan_axis.angle_start          
+    _diffrn_scan_axis.angle_range         
+    _diffrn_scan_axis.angle_increment    
+    _diffrn_scan_axis.displacement_start     
+    _diffrn_scan_axis.displacement_range    
+    _diffrn_scan_axis.displacement_increment 
+omega SCAN1 0.0 0.3 0.1 0 0 0
+trans SCAN1 . . . 287.22 0 0
+
+    loop_
+      _diffrn_scan_frame.frame_id
+      _diffrn_scan_frame.scan_id
+      _diffrn_scan_frame.frame_number
+           1  SCAN1    1
+           2  SCAN1    2
+           3  SCAN1    3
