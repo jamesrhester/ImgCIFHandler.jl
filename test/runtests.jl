@@ -1,12 +1,14 @@
 # Test
 using ImgCIFHandler
 using CrystalInfoFramework
+using DataFrames
 using FilePaths
 using Test
 using URIs
 
 const b4master = joinpath(@__DIR__,"testfiles/b4_master.cif")
 const b4master_rem = joinpath(@__DIR__,"testfiles/b4_master_remote.cif")
+const b4master_arch = joinpath(@__DIR__,"testfiles/b4_master_archive.cif")
 const multi_scan = joinpath(@__DIR__,"testfiles/all_scans.cif")
 
 extract_files() = begin
@@ -27,7 +29,7 @@ end
 
 @testset "Test HDF5 file loading" begin
     q = joinpath(@__DIR__,"testfiles/simple3D.h5")
-    x = imgload(q,Val(:HDF),path="/entry/data/test",frame=1)
+    x = imgload(q,Val(:HDF5),path="/entry/data/test",frame=1)
     @test size(x) == (4,3)
 end
 
@@ -51,11 +53,28 @@ end
 
 @testset "Test extraction from archive" begin
     loc = unescapeuri(joinpath(@__DIR__,"testfiles/b4_mini.tar"))
-    x = imgload(URI(scheme="file",path=loc),Val(:CBF),arch_type="TAR",arch_path="s01f0003.cbf")
+    dl_info = DataFrame(:uri=>"$(URI(scheme="file",path=loc))",
+                        :full_uri=>"$(URI(scheme="file",path=loc))",
+                        :format=>"CBF",
+                        :archive_format=>"TAR",
+                        :archive_path=>"s01f0003.cbf")
+    x = imgload(dl_info)
     @test size(x) == (4148,4362)
     loc = unescapeuri(joinpath(@__DIR__,"testfiles/b4_mini.tar.bz2"))
-    x = imgload(URI(scheme="file",path=loc),Val(:CBF),arch_type="TBZ",arch_path="s01f0003.cbf")
+    dl_info.archive_format=["TBZ"]
+    dl_info.uri=["$(URI(scheme="file",path=loc))"]
+    dl_info.full_uri=["$(URI(scheme="file",path=loc))"]
+    x = imgload(dl_info)
     @test size(x) == (4148,4362)
+end
+
+@testset "Test extraction of multiple images from archive" begin
+    cf = first(Cif(Path(b4master_arch))).second
+    imgsum = imgload(cf,["1","2","3"])
+    @test size(imgsum) == (4148,4362)
+    # check that we have a sum
+    imgs = imgload.(Ref(cf),["1","2","3"])
+    @test imgs[1]+imgs[2]+imgs[3] == imgsum
 end
 
 @testset "Test axis getting and setting" begin
@@ -97,7 +116,10 @@ end
     uri = "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
     s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"m0220c_02_0171.cbf",bb)
     @test s == "SCAN02" && f == 171
-
+    ext_info = ImgCIFHandler.external_specs_from_bin_id(["1410","1411","1412"],bb)
+    @test ext_info.uri[1] == "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
+    @test size(ext_info,1) == 3
+    @test ext_info.archive_path[3] == "m0220c_02_0212.cbf"
 end
 
 

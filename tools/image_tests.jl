@@ -208,15 +208,6 @@ end
     # account for unlooped case
     
     scan_loop = get_loop(incif,cn*"axis_id")
-    if size(scan_loop,1) == 0 && haskey(incif,cn*"axis_id")
-        loop_names = [cn*"axis_id",cn*"displacement_range",cn*"angle_range",cn*"angle_start",
-                      cn*"angle_increment",cn*"displacement_increment",cn*"displacement_start"]
-        for n in loop_names
-            if !haskey(incif,n) incif[n] = [missing] end
-        end
-        create_loop!(incif,loop_names)
-        scan_loop = get_loop(incif,cn*"axis_id")
-    end
 
     actual = filter(scan_loop) do r
         !ismissing(getproperty(r,cn*"displacement_range")) || !ismissing(getproperty(r,cn*"angle_range"))
@@ -487,6 +478,8 @@ end
 """
 get_archive_member_name(incif;pick=1,subs=Dict()) = begin
 
+    @debug "Looking for member in" subs
+    
     # Get all referenced URIs
     
     urls = unique(incif["_array_data_external_data.uri"])
@@ -499,9 +492,12 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
 
         # Construct actual URI
         
-        if !isempty(subs)
+        if haskey(subs,u)
             loc = URI("file://"*subs[u])
         else
+            if !isempty(subs)
+                @warn "Warning: no substitute for $u"
+            end
             loc = URI(make_absolute_uri(incif,u))
         end
 
@@ -524,8 +520,9 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
             end
             @debug "Got $x for $u"
             result_dict[u] = x == nothing ? "" : x
-        elseif arch_type === nothing  #u is the whole frame
-            result_dict[u] = u
+        elseif arch_type === nothing  #No unpacking possible eg HDF5/single frame
+            #TODO: actually check the file exists using http request
+            result_dict[u] = "$loc"
         else
             @warn "Partial downloading not available for $u: try full downloading with option -f"
         end
@@ -533,6 +530,8 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
 
     # result_dict links uri to a filename, which is contained in that uri
 
+    @debug "Final result" result_dict
+    
     return result_dict     
 end
 
@@ -680,8 +679,8 @@ the image.
 """
 annotate_check_image(im, rot, incif;border=30,scan_id=nothing,frame_no=nothing) = begin
 
-    width_slow = size(im,2)
-    height_fast = size(im,1)   #in display, height is fast direction
+    width_orig = size(im,2)
+    height_orig = size(im,1)   #in display, height is fast direction
     
     # Rotate the image matrix
 
@@ -698,36 +697,38 @@ annotate_check_image(im, rot, incif;border=30,scan_id=nothing,frame_no=nothing) 
 
     # Transform beam centre coordinates
 
-    slow_c = slow_c - width_slow/2
-    fast_c = fast_c - height_fast/2
+    slow_c = slow_c - width_orig/2
+    fast_c = fast_c - height_orig/2
     new_slow_c = cosd(rot)* slow_c + sind(rot)* fast_c
     new_fast_c = -sind(rot)* slow_c + cosd(rot)* fast_c
-    new_slow_c = new_slow_c + width_slow/2
-    new_fast_c = new_fast_c + height_fast/2
+    new_slow_c = new_slow_c + width_orig/2
+    new_fast_c = new_fast_c + height_orig/2
                              
     # TODO: scale to useful size
     
-    width = size(im_new,2)   #slow direction
-    height = size(im_new,1)  #fast direction
+    width_new = size(im_new,2)   #slow direction
+    height_new = size(im_new,1)  #fast direction
+
+    @debug "Old, new height, width" height_orig width_orig height_new width_new
 
     # Start the drawing
     
-    Luxor.Drawing(2*width+border*4,height+border*2+20, :rec)
+    Luxor.Drawing(width_new+width_orig+border*4,maximum((height_new,height_orig))+border*2+20, :rec)
     background("white")
 
     # Place rotated and original images
 
     placeimage(Gray.(im_new),Point(border,border))
-    placeimage(Gray.(im),Point(border*3 + width,border))
+    placeimage(Gray.(im),Point(border*3 + width_new,border))
     setcolor("black")
-    label("Laboratory frame",0,Point(border+width/2,border*2+height+10))
-    label("Original",0,Point(border*3+3*width/2,border*2+height+10))
+    label("Laboratory frame",0,Point(border+width_new/2,border*2+height_new+10))
+    label("Original",0,Point(border*3+width_new+width_orig/2,border*2+height_orig+10))
     
     # draw a square for the beam centre
     
     setcolor("red")
     box(Point(new_slow_c+border,new_fast_c+border),4,4,:fill)
-    draw_axes(height,width,rot,(fast_n,slow_n))
+    draw_axes(height_new,width_new,rot,(fast_n,slow_n))
     snapshot(fname="$(incif.original_file)"*".png")
 end
 
@@ -822,7 +823,45 @@ end
 
 ==#
 
-run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false) = begin
+"""
+    fix_loops!(cif)
+
+Make all items that are unlooped but we need to be looped, into
+loops
+"""
+fix_loops!(incif) = begin
+
+    loop_groups = (("_diffrn_scan_axis",["axis_id","displacement_range","angle_range",
+                                         "angle_start","angle_increment",
+                                         "displacement_increment","displacement_start"]),
+                   ("_diffrn_scan",["id","frames"])
+                   )
+
+    for (cn,lnames) in loop_groups
+        test_loop = get_loop(incif,cn*"."*lnames[1])
+        if size(test_loop,1) == 0 && haskey(incif,cn*"."*lnames[1])
+            for n in lnames
+                if !haskey(incif,cn*"."*n) incif[cn*"."*n] = [missing] end
+            end
+            create_loop!(incif,map(x->cn*"."*x,lnames))
+        end
+    end
+end
+
+"""
+    run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1)
+
+Test `incif` for conformance to imgCIF consistency requirements. Meaning of arguments:
+`images`: run checks on downloaded image
+`always`: always run checks on images, even if previous checks fail
+`full`: download all referenced archives in full
+`connected`: perform checks that require an internet connection
+`pick`: archive member to download for image checks
+`subs`: dictionary of uri -> local file correspondences to avoid downloading
+`savepng`: output annotated check image to a file
+`accum`: accumulate this many frames to make the check image
+"""
+run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1) = begin
     ok = true
     println("Running checks (no image download)")
     println("="^40*"\n")
@@ -862,12 +901,18 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         println("\nRunning checks with downloaded images")
         println("="^40*"\n")
 
-        # Choose image to load
+        # Choose image(s) to load
 
         load_id = find_load_id(incif,all_archives)
+
+        if accum > 1
+            load_ids = get_id_sequence(incif,load_id,accum)
+        else
+            load_ids = [load_id]
+        end
         
         try
-            testimage = imgload(incif,load_id;local_version=subs)
+            testimage = imgload(incif,load_ids;local_version=subs)
         catch e
             @debug e
             verdict([(false,"Unable to access image $load_id: $e")])
@@ -879,8 +924,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         new_im,rot = create_check_image(incif,testimage,logscale=false)
         imgfn = nothing
         if savepng
-            #imgfn=string(incif.original_file,".png")
-            scan_id,frame_no = ImgCIFHandler.scan_frame_from_ext_id(load_id,incif)
+            scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
             annotate_check_image(new_im,rot,incif,scan_id=scan_id,frame_no=frame_no)
         else
             show_check_image(new_im,rot)
@@ -907,6 +951,12 @@ end
 parse_cmdline(d) = begin
     s = ArgParseSettings(d)
     @add_arg_table! s begin
+        "-a", "--accumulate"
+        help = "Accumulate multiple images for check"
+        nargs = 1
+        default = [1]
+        metavar = ["number"]
+        arg_type = Int64
         "-i", "--check-images"
         help = "Also perform checks on the images"
         nargs = 0
@@ -953,7 +1003,7 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     parsed_args = parse_cmdline("Check contents of imgCIF files")
     #println("$parsed_args")
-    incif = Cif(FilePaths.Path(parsed_args["filename"]))
+    incif = Cif(FilePaths.Path(parsed_args["filename"]),native=true)
     if isnothing(parsed_args["blockname"])
         blockname = first(incif).first
     else
@@ -964,12 +1014,18 @@ if abspath(PROGRAM_FILE) == @__FILE__
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
+
+    # Fix loops
+
+    fix_loops!(incif[blockname])
+    
     result,img = run_img_checks(incif[blockname],
                                 images=parsed_args["check-images"],
                                 always=parsed_args["always-check-images"],
                                 full = parsed_args["full-download"],
                                 connected = !parsed_args["no-internet"],
                                 pick = parsed_args["pick"][],
+                                accum = parsed_args["accumulate"][],
                                 subs = subs,
                                 savepng = parsed_args["output-png"]
                                 )

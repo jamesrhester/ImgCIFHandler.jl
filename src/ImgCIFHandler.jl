@@ -19,11 +19,17 @@ module ImgCIFHandler
 
 using CrystalInfoFramework
 using FilePaths
+using DataFrames
 import Tar
 using CodecBzip2
 using CodecZlib
 using Downloads
+
+# HDF5 support with filters
+
 using HDF5
+using H5Zblosc,H5Zbzip2,H5Zlz4,H5Zzstd
+
 using TranscodingStreams
 using URIs
 using SimpleBufferStream
@@ -36,6 +42,7 @@ export get_beam_centre
 export get_gonio_axes
 export get_pixel_coordinates
 export get_surface_axes #get the axes used to locate pixels on the detector
+export get_id_sequence #get a list of sequential binary ids from the same scan
 
 include("hdf_image.jl")
 include("cbf_image.jl")
@@ -45,64 +52,25 @@ include("imgcif.jl")
 get_image_ids(c::CifContainer) = begin
     return c["_array_data.binary_id"]
 end
-
+    
 """
     imgload(c::Block,array_id)
 
 Return the image referenced in CIF Block `c` corresponding to the specified raw array identifier.
 `local_version` gives local copies for URLs listed in `c`.
 """
-imgload(c::CifContainer,frame_id;local_version=Dict()) = begin
-    ext_cat = "_array_data_external_data"   #for convenience
-    cat = "_array_data"
+imgload(c::CifContainer,bin_id;local_version=Dict()) = begin
+
+    dl_info = external_specs_from_bin_id(bin_id,c)
     
-    img_loop = get_loop(c,"$cat.binary_id")
-    if !("$cat.external_data_id" in names(img_loop))
-        @error "$(c.original_file) does not contain external data pointers" img_loop
-    end
-    if !("$frame_id" in c["$cat.binary_id"])
-        throw(error("Data with id $frame_id is not found"))
-    end
-    info = filter(row -> row["$cat.binary_id"] == "$frame_id", img_loop,view=true)
-    if size(info)[1] > 1
-        throw(error("Array data $frame_id is ambiguous"))
-    end
-    if size(info)[1] == 0
-        throw(error("No array data with id $frame_id found"))
-    end
-
-    # One level of indirection
-
-    ext_id = info[1,"$cat.external_data_id"]
-    ext_loop = get_loop(c,"$ext_cat.id")
-    info = filter(row -> row["$ext_cat.id"] == ext_id, ext_loop, view = true)
-
-    info = info[1,:]
-    all_cols = names(info)
-    full_uri = make_absolute_uri(c,info["$ext_cat.uri"])
-    println("Loading image from $full_uri")
-    ext_loc = "$ext_cat.path" in all_cols ? info["$ext_cat.path"] : nothing
-    ext_format = "$ext_cat.format" in all_cols ? Val(Symbol(info["$ext_cat.format"])) : nothing
-    ext_comp = "$ext_cat.archive_format" in all_cols ? info["$ext_cat.archive_format"] : nothing
-    ext_ap = "$ext_cat.archive_path" in all_cols ? info["$ext_cat.archive_path"] : nothing
-    ext_frame = "$ext_cat.frame" in all_cols ? info["$ext_cat.frame"] : nothing
-    local_copy =  get(info,"$ext_cat.uri", nothing)
-    if !isnothing(local_copy)
-        local_copy = get(local_version,local_copy,nothing)
-        @debug "Loading image from $local_copy"
-    end
-    imgload(full_uri,
-            ext_format;
-            arch_type = ext_comp,
-            arch_path = ext_ap,
-            path = ext_loc,
-            frame = ext_frame,
-            local_copy = local_copy
-            )
+    local_copy =  get(local_version,"$(dl_info[1,:uri])", nothing)
+    @debug "Loading image from" local_copy
+    
+    imgload(dl_info,local_copy = local_copy)
 end
 
 """
-    imgload(uri,format;arch_type=nothing,arch_path=nothing,file_compression=nothing,
+    imgload(uri::URI,format;arch_type=nothing,arch_path=nothing,file_compression=nothing,
             frame=1,local_copy=nothing)
 
 Return the raw 2D data found at `uri`, which may have been optionally
@@ -112,59 +80,9 @@ has `format` and the target frame is `frame`. `local_copy` is a local copy of
 `uri`, if present.
 
 """
-imgload(uri::URI,format::Val;kwargs...) = begin
+imgload(ext_info::DataFrame;kwargs...) = begin
     # May switch later to native if we can get Tar to terminate early
-    imgload_os(uri,format;kwargs...)
-end
-
-imgload_os(uri::URI,format::Val;arch_type=nothing,arch_path=nothing,file_compression=nothing,local_copy = nothing,kwargs...) = begin
-    # Use OS pipelines to download efficiently
-    cmd_list = Cmd[]
-    loc = mktempdir()
-    decomp_option = "-v"
-    if arch_type == "TGZ" decomp_option = "-z" end
-    if arch_type == "TBZ" decomp_option = "-j" end
-    if arch_type in ("TGZ","TBZ","TAR")
-        if local_copy == nothing
-            push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
-        else
-            push!(cmd_list, `cat $local_copy`)
-        end
-        push!(cmd_list, `tar -C $loc -x $decomp_option -f - --occurrence $arch_path`)
-        temp_local = joinpath(loc,arch_path)
-    else
-        if local_copy == nothing
-            temp_local = joinpath(loc,"temp_download")
-            push!(cmd_list, `curl $uri -o $temp_local`)
-        else
-            temp_local = local_copy
-        end
-    end
-    @debug "Command list is $cmd_list"
-    if length(cmd_list) > 0
-        try
-            run(pipeline(cmd_list...))
-        catch exc
-            @debug "Finished downloading" exc
-        end
-    end
-    # Now the final file is in $temp_local
-    if arch_type == "ZIP"   #has been downloaded to local storage
-        run(`unzip $temp_local $arch_path -d $loc`)
-        temp_local = joinpath(loc,arch_path)
-    end
-    if !isnothing(file_compression)
-        final_file = open(joinpath(loc,"final_file"),"w")
-        if file_compression == "GZ"
-            run(pipeline(`zcat $temp_local`,final_file))
-        elseif file_compression == "BZ2"
-            run(pipeline(`bzcat $temp_local`,final_file))
-        end
-        close(final_file)
-    else
-        mv(temp_local,joinpath(loc,"final_file"))
-    end
-    imgload(joinpath(loc,"final_file"),format;kwargs...)
+    imgload_os(ext_info;kwargs...)
 end
 
 imgload_native(uri::URI,format::Val;arch_type=nothing,arch_path=nothing,file_compression=nothing,kwargs...)= begin
@@ -275,6 +193,108 @@ imgload_native(uri::URI,format::Val;arch_type=nothing,arch_path=nothing,file_com
     imgload(endloc,format;kwargs...)
 end
 
+"""
+    imgload_os(ext_info::DataFrame;local_copy = nothing)
+
+Return an image obtained by summing a series of images corresponding to the entries in `ext_info`
+"""
+imgload_os(ext_info::DataFrame;local_copy = nothing) = begin
+
+    # Practical restrictions: only one uri and archive type
+
+    if length(unique(ext_info.full_uri)) > 1
+        throw(error("Multiple images must be at the same URI"))
+    end
+
+    uri = ext_info.full_uri[1]
+
+    # Use OS pipelines to download efficiently
+
+    cmd_list = Cmd[]
+    loc = mktempdir()
+    decomp_option = "-v"
+
+    arch_type = "archive_format" in names(ext_info) ? ext_info.archive_format[1] : nothing
+    arch_paths = "archive_path" in names(ext_info) ? ext_info.archive_path : nothing
+    
+    if arch_type == "TGZ" decomp_option = "-z" end
+    if arch_type == "TBZ" decomp_option = "-j" end
+    if arch_type in ("TGZ","TBZ","TAR")
+        if local_copy == nothing
+            push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
+        else
+            push!(cmd_list, `cat $local_copy`)
+        end
+        push!(cmd_list, `tar -C $loc -x $decomp_option -f - --occurrence $arch_paths`)
+        temp_locals = joinpath.(Ref(loc),arch_paths)
+    else
+        if local_copy == nothing
+            temp_locals = [joinpath(loc,"temp_download")]
+            push!(cmd_list, `curl $uri -o $(temp_locals[1])`)
+        else
+            temp_locals = [local_copy]
+        end
+    end
+    @debug "Command list" cmd_list
+    if length(cmd_list) > 0
+        try
+            run(pipeline(cmd_list...))
+        catch exc
+            @debug "Finished downloading" exc
+        end
+    end
+    
+    # Now the final files are listed in $temp_locals
+
+    if arch_type == "ZIP"   #has been downloaded to local storage
+        run(`unzip $(temp_locals[1]) $arch_paths -d $loc`)
+        temp_locals = joinpath.(Ref(loc),arch_paths)
+    end
+
+    if "file_compression" in names(ext_info)
+        fc = ext_info.file_compression[1]
+    else
+        fc = nothing
+    end
+    
+    temp_locals = map(temp_locals) do tl
+        if !isnothing(fc)
+            final_file = open(joinpath(loc,tl*"final"),"w")
+            if fc == "GZ"
+                run(pipeline(`zcat $tl`,final_file))
+            elseif fc == "BZ2"
+                run(pipeline(`bzcat $tl`,final_file))
+            end
+            close(final_file)
+            tl*"_final"
+        else
+            if tl != local_copy #ok to move
+                mv(tl,joinpath(loc,tl*"_final"))
+                tl*"_final"
+            else
+                local_copy
+            end
+        end
+    end
+
+    @debug "Final files for reading are" temp_locals
+
+    # Now accumulate the image values
+
+    path = "path" in names(ext_info) ? ext_info.path[1] : nothing
+    frame = "frame" in names(ext_info) ? parse(Int64,ext_info.frame[1]) : nothing
+    
+    final_image = imgload(temp_locals[1],Val(Symbol(ext_info.format[1]));path=path,frame=frame)
+    for fr_no in 2:size(ext_info,1)
+        path = "path" in names(ext_info) ? ext_info.path[fr_no] : nothing
+        frame = "frame" in names(ext_info) ? parse(Int64,ext_info.frame[fr_no]) : nothing
+        @debug "Accumulating frame $fr_no" path frame
+        
+        final_image += imgload(temp_locals[fr_no],Val(Symbol(ext_info.format[1]));path=path,frame=frame)
+    end
+    return final_image
+end
+
 imgload(c::CifContainer,frame::Int;scan=nothing,diffrn=nothing) = begin
     println("Not implemented yet")
 end
@@ -292,7 +312,7 @@ imgload(c::Cif) = begin
 end
 
 imgload(p::AbstractPath) = begin
-    imgload(Cif(p))
+    imgload(Cif(p,native=true))
 end
 
 imgload(s::AbstractString) = begin
@@ -438,64 +458,5 @@ peek_image(uri::URI,arch_type,cif_block::CifContainer;entry_no=0,check_name=true
 end
 
 peek_image(u::URI,arch_type) = peek_image(u,arch_type,Block{String}())  #for testing
-
-"""
-    scan_frame_from_img_name(u,name,cif_block)
-
-Return the scan_id, frame_id for the given `name` at URL `u` according to contents
-of `cif_block`. If `name` is `nothing`, `u` must point to a single frame. If `cif_block`
-contains no scan or frame information, (nothing,1) is returned.
-"""
-scan_frame_from_img_name(u,name,cif_block) = begin
-    ext_loop = get_loop(cif_block,"_array_data_external_data.id")
-    fel = filter(row->row["_array_data_external_data.uri"] == u,ext_loop,view=true)
-    if size(fel,1) == 0 throw(error("$u not found in cif block")) end
-    if name != nothing
-        fel = filter(row->row["_array_data_external_data.archive_path"]==name,fel,view=true)
-    end
-    if size(fel,1) != 1
-        throw(error("$u $name does not correspond to a single frame (got $(size(fel,1)) answers)"))
-    end
-
-    # now find the frame number external_id -> binary_id -> frame_id -> frame_no
-
-    ext_id = fel[!,"_array_data_external_data.id"][]
-    return scan_frame_from_ext_id(ext_id,cif_block)
-end
-
-"""
-    scan_frame_from_ext_id(external_id,cif_block)
-
-Return the scan_id, frame_id for the given `external_id` according to contents
-of `cif_block`. If `cif_block` contains no scan or frame information, 
-(nothing,1) is returned.
-"""
-scan_frame_from_ext_id(ext_id,cif_block) = begin
-    array_loop = filter(row->row["_array_data.external_data_id"]==ext_id,
-                      get_loop(cif_block,"_array_data.binary_id"),view=true)
-    bin_id = array_loop[!,"_array_data.binary_id"][]
-
-    # assume that frame_id is globally unique, not per scan
-    
-    frame_loop = filter(row->row["_diffrn_data_frame.binary_id"]==bin_id,
-                      get_loop(cif_block,"_diffrn_data_frame.id"),view=true)
-    frame_id = frame_loop[!,"_diffrn_data_frame.id"][]
-
-    # get scan id
-    
-    scan_loop = filter(row->row["_diffrn_scan_frame.frame_id"]==frame_id,
-                       get_loop(cif_block,"_diffrn_scan_frame.frame_id"), view=true)
-    if !haskey(cif_block,"_diffrn_scan.id")
-        scan_id = nothing
-    elseif length(cif_block["_diffrn_scan.id"])==1
-        scan_id = cif_block["_diffrn_scan.id"][]
-    else
-        scan_id = scan_loop[!,"_diffrn_scan_frame.scan_id"][]
-    end
-    frame_no = scan_loop[!,"_diffrn_scan_frame.frame_number"][]
-    return scan_id,parse(Int64,frame_no)
-end
-
-
 
 end
