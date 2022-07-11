@@ -171,12 +171,12 @@ scan_frame_from_bin_id(bin_id,cif_block) = begin
 end
 
 """
-    external_specs_from_bin_id(binary_ids::Vector,incif)
+    external_specs_from_bin_ids(binary_ids::Vector,incif)
 
 Get the download specifications for each of the provided binary ids, returning
 a DataFrame. 
 """
-external_specs_from_bin_id(bin_ids::Vector,c) = begin
+external_specs_from_bin_ids(bin_ids::Vector,c) = begin
     ext_cat = "_array_data_external_data"   #for convenience
     cat = "_array_data"
     
@@ -213,8 +213,8 @@ external_specs_from_bin_id(bin_ids::Vector,c) = begin
     return info
 end
 
-external_specs_from_bin_id(bin_id,c) = begin
-    external_specs_from_bin_id([bin_id],c)
+external_specs_from_bin_ids(bin_id,c) = begin
+    external_specs_from_bin_ids([bin_id],c)
 end
 
 """

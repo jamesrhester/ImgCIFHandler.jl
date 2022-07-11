@@ -14,7 +14,9 @@ Julia, including handling the variety of formats provided. The only
 function exported is `imgload`.
 
 ==#
-
+"""
+Handle items in an imgCIF file. See method `imgload`.
+"""
 module ImgCIFHandler
 
 using CrystalInfoFramework
@@ -25,10 +27,7 @@ using CodecBzip2
 using CodecZlib
 using Downloads
 
-# HDF5 support with filters
-
-using HDF5
-using H5Zblosc,H5Zbzip2,H5Zlz4,H5Zzstd
+# See format-specific includes for more using statements
 
 using TranscodingStreams
 using URIs
@@ -54,14 +53,15 @@ get_image_ids(c::CifContainer) = begin
 end
     
 """
-    imgload(c::Block,array_id)
+    imgload(c::Block,array_ids)
 
-Return the image referenced in CIF Block `c` corresponding to the specified raw array identifier.
-`local_version` gives local copies for URLs listed in `c`.
+Return the image referenced in CIF Block `c` corresponding to the specified raw array identifiers.
+`local_version` gives local copies for URLs listed in `c`. On failure returns a string containing
+an error message.
 """
-imgload(c::CifContainer,bin_id;local_version=Dict()) = begin
+imgload(c::CifContainer,bin_ids;local_version=Dict()) = begin
 
-    dl_info = external_specs_from_bin_id(bin_id,c)
+    dl_info = external_specs_from_bin_ids(bin_ids,c)
     
     local_copy =  get(local_version,"$(dl_info[1,:uri])", nothing)
     @debug "Loading image from" local_copy
@@ -70,15 +70,11 @@ imgload(c::CifContainer,bin_id;local_version=Dict()) = begin
 end
 
 """
-    imgload(uri::URI,format;arch_type=nothing,arch_path=nothing,file_compression=nothing,
-            frame=1,local_copy=nothing)
+    imgload(img_info::DataFrame,local_copy=nothing)
 
-Return the raw 2D data found at `uri`, which may have been optionally
-compressed into an archive of format `compressed` with internal
-archive path to the data of `arch_path`. The object thus referenced
-has `format` and the target frame is `frame`. `local_copy` is a local copy of
-`uri`, if present.
-
+Return the raw 2D data specified by the information in
+`img_info`. `local_copy` is a local copy of the URI referenced
+in `img_info`, if present.
 """
 imgload(ext_info::DataFrame;kwargs...) = begin
     # May switch later to native if we can get Tar to terminate early
@@ -283,7 +279,13 @@ imgload_os(ext_info::DataFrame;local_copy = nothing) = begin
 
     path = "path" in names(ext_info) ? ext_info.path[1] : nothing
     frame = "frame" in names(ext_info) ? parse(Int64,ext_info.frame[1]) : nothing
-    
+
+    # Do a precheck
+
+    can_load = check_format(temp_locals[1],Val(Symbol(ext_info.format[1]));path=path,frame=frame)
+    if !can_load[1]
+        return can_load[2]
+    end
     final_image = imgload(temp_locals[1],Val(Symbol(ext_info.format[1]));path=path,frame=frame)
     for fr_no in 2:size(ext_info,1)
         path = "path" in names(ext_info) ? ext_info.path[fr_no] : nothing
@@ -326,6 +328,25 @@ end
 make_absolute_uri(c::CifContainer,u::AbstractString) = begin
     resolvereference(URI(c.original_file),URI(u))
 end
+
+# Format checking
+
+#==
+We define a generic method to pre-check image files before attempting
+to load them. This should catch syntax errors, unsupported features,
+and so forth. Particular formats can define this method. It returns
+a tuple `(bool, [message])` where `bool` is true for success, and
+`messages` contains a description of the error on failure.
+==#
+
+"""
+    check_format(loc,fmt;kwargs...)
+
+Check that the image in local file `loc` with format `fmt` is
+valid. Returns `(false,"message")` on failure and `(true,"")` on
+success.  
+"""
+check_format(loc,fmt;kwargs...) = (true,"")
 
 ## Some utility files
 

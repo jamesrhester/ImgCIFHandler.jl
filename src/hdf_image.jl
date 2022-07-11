@@ -1,3 +1,8 @@
+# HDF5 support with filters
+
+using HDF5
+using H5Zblosc,H5Zbzip2,H5Zlz4,H5Zzstd,H5Zbitshuffle
+
 """
     imgload(handle,::Val{:HDF};path="/";frame=1)
 
@@ -16,3 +21,33 @@ imgload(loc::AbstractString,::Val{:HDF5};path="/",frame=1) = begin
     @debug "$(size(result))"
     return result
 end
+
+"""
+Acceptable filters: the bundled filters of the
+HDF5 filter plugin package, see 
+https://portal.hdfgroup.org/display/support/HDF5+Filter+Plugins
+
+BZIP2, LZF, BLOSC, MAFISC, LZ4, Bitshuffle, and ZFP
+"""
+const allowed_filters = (307,32000,32001,32002,32004,32008,32013)
+
+"""
+    check_format(loc::AbstractString, Val{:HDF5};path="/",frame=1)
+
+Check that the given data set uses allowed filters
+"""
+check_format(loc::AbstractString, ::Val{:HDF5};path="/",frame=1) = begin
+    messages = ""
+    f = h5open(loc)
+    ds = f[path]
+    filt_pipeline = HDF5.get_create_properties(ds).filters
+    for filt in filt_pipeline
+        if !(filt.filter_id in allowed_filters)
+            messages *= "\nFilter ID $(filt.name) used in $loc/$path is not allowed\n"
+        end
+    end
+    close(f)
+    if messages != "" return (false,messages) end
+    return (true,"")
+end
+

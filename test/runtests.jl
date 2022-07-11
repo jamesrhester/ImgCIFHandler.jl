@@ -12,6 +12,7 @@ const b4master_arch = joinpath(@__DIR__,"testfiles/b4_master_archive.cif")
 const multi_scan = joinpath(@__DIR__,"testfiles/all_scans.cif")
 
 extract_files() = begin
+    clean_up() # in case we failed last time
     # Uncompress archive
     archfile = joinpath(@__DIR__,"testfiles/b4_mini.tar.bz2")
     run(`bunzip2 -k $archfile`)
@@ -23,8 +24,8 @@ extract_files() = begin
 end
 
 clean_up() = begin
-    rm(joinpath(@__DIR__,"testfiles/test_cbf_unzipped"),recursive=true)
-    rm(joinpath(@__DIR__,"testfiles/b4_mini.tar"))
+    rm(joinpath(@__DIR__,"testfiles/test_cbf_unzipped"),force=true,recursive=true)
+    rm(joinpath(@__DIR__,"testfiles/b4_mini.tar"),force=true)
 end
 
 @testset "Test HDF5 file loading" begin
@@ -116,7 +117,7 @@ end
     uri = "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
     s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"m0220c_02_0171.cbf",bb)
     @test s == "SCAN02" && f == 171
-    ext_info = ImgCIFHandler.external_specs_from_bin_id(["1410","1411","1412"],bb)
+    ext_info = ImgCIFHandler.external_specs_from_bin_ids(["1410","1411","1412"],bb)
     @test ext_info.uri[1] == "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
     @test size(ext_info,1) == 3
     @test ext_info.archive_path[3] == "m0220c_02_0212.cbf"
