@@ -1,7 +1,11 @@
 # HDF5 support with filters
 
 using HDF5
-using H5Zblosc,H5Zbzip2,H5Zlz4,H5Zzstd,H5Zbitshuffle
+using H5Zblosc,H5Zbzip2,H5Zlz4,H5Zzstd
+
+# Uncomment when H5Zbitshuffle is officially registered
+
+# using H5Zbitshuffle 
 
 """
     imgload(handle,::Val{:HDF};path="/";frame=1)

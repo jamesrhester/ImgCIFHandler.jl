@@ -465,6 +465,9 @@ peek_image(uri::URI,arch_type,cif_block::CifContainer;entry_no=0,check_name=true
         @debug "Finished downloading" exc
     end
 
+    # Just the last file is the one we want
+    fname = split(fname,"\n")[end]
+    
     @debug fname
     if fname != nothing && check_name
         if haskey(cif_block,"_array_data_external_data.archive_path")
