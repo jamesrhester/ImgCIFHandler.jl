@@ -42,8 +42,9 @@ check_format(loc::AbstractString, ::Val{:HDF5};path="/",frame=1) = begin
     ds = f[path]
     filt_pipeline = HDF5.get_create_properties(ds).filters
     for filt in filt_pipeline
-        if !(filt.filter_id in allowed_filters)
-            messages *= "\nFilter ID $(filt.name) used in $loc/$path is not allowed\n"
+        filter_id = HDF5.Filters.filterid(typeof(filt))
+        if !(filter_id in allowed_filters)
+            messages *= "\nFilter ID $(filter_id) used in $loc/$path is not allowed\n"
         end
     end
     close(f)

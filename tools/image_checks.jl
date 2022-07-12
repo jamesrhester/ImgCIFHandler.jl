@@ -34,3 +34,27 @@ const img_types = Dict(UInt8 =>"unsigned 8-bit integer",
     end
     return messages
 end
+
+@imgcheck "Overloaded values present" mask_check(incif,img,img_id) = begin
+    messages = []
+
+    # Assume that more values of typemax than of preceding 10 values is likely a
+    # sign of overload
+
+    maxval = typemax(eltype(img))
+
+    num_max = count(x->x == maxval,img)
+    num_lower = count(x-> x > maxval - 10 && x < maxval,img)
+    if num_max > num_lower
+        if !haskey(incif,"_array_intensities.overload")
+            push!(messages,(false,"$num_max apparently overloaded intensities present (values of $maxval), but _array_intensities.overload is missing"))
+        end
+    end
+    if haskey(incif,"_array_intensities.overload")
+        ovld = parse(Float64,incif["_array_intensities.overload"][])
+        if ovld > maxval
+            push!(messages(false,"_array_intensities.overload value of $ovld is greater than maximum possible value for this image element type $maxval"))
+        end
+    end
+    return messages
+end

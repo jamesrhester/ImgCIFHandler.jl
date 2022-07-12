@@ -16,7 +16,6 @@ using Luxor
 const test_list = []
 const test_list_with_img = []
 const test_full_list = []
-const test_list_fmt = []
 const dictionary_checks = []
 
 include("check_macros.jl")
@@ -78,6 +77,7 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
         
         if haskey(subs,u)
             loc = URI("file://"*subs[u])
+            @debug "Using $loc for $u" subs
         else
             if !isempty(subs)
                 @warn "Warning: no substitute for $u"
@@ -177,6 +177,39 @@ verdict(msg_list) = begin
 end
 
 """
+    apply_mask!(incif,im)
+
+Detect masked pixels and change their value to zero. A masked pixel is
+any pixel less than the _array_intensities.underload, or greater than
+or equal to _array_intensities.overload. Assumes only a single array
+type in `incif`.
+"""
+apply_mask!(incif,im::Array{T,2}) where T = begin
+    overload = typemax(T)+1
+    if haskey(incif,"_array_intensities.overload")
+        overload = parse(Float64,incif["_array_intensities.overload"][])
+    end
+    underload = -1
+    if haskey(incif,"_array_intensities.underload")
+        underload = parse(Float64,incif["_array_intensities.underload"][])
+    end
+
+    @debug "Pixels >= $underload and < $overload are valid"
+
+    # debugging information
+
+    masked = count(x-> x >= overload || x < underload, im)
+    @debug "Number of masked pixels:" masked
+
+    if masked > 0
+        for i in eachindex(im)
+            im[i] = im[i] >= overload || im[i] < underload ? 0 : im[i]
+        end
+    end
+    return im
+end
+
+"""
     create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true)
 
 Create a contrast enhanced image from the matrix `im`. If `gravity` is true, 
@@ -185,16 +218,21 @@ of the image so that down on the image
 becomes down in real space. Returns the unrotated image and the rotation.
 """
 create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
+
+    # First detect mask and set to zero
+
+    apply_mask!(incif,im)
     
     # First try to improve contrast
     
-    #alg = Equalization(nbins=256,maxval = floor(maximum(im)/10))
     if maximum(im) > 1.0
         im = im/maximum(im)
     end
     clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
     alg = LinearStretching(src_maxval = clamp_high)
     im_new = adjust_histogram(im,alg)
+    alg = Equalization(nbins=256,maxval = maximum(im))
+    im_new = adjust_histogram(im_new,alg)
     @debug "Max, min for adjusted image:" maximum(im_new) minimum(im_new)
 
     # Adjust geometry if we know gravity
@@ -254,21 +292,49 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
 end
 
 """
-    annotate_check_image(image,rotation,beam_centre,names,filename; border=30)
+    annotate_check_image(image,rotation,beam_centre,names,filename; border=30, size=512)
 
 Add axes and beam centre to `image`, saving the result in
 `filename`. `names` contains the names of the fast and slow
 axes, in that order. `border` is the size of the border around
-the image.
+the image. `hsize` is the target maximum horizontal dimension of the check image,
+in pixels.
 """
-annotate_check_image(im, rot, incif;border=30,scan_id=nothing,frame_no=nothing) = begin
+annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no=nothing) = begin
 
+    # In the following there are three images: the original image `im`,
+    # the rotated scaled image `im_new` and the reference image
+    # next to it `im_ref`
+    
     width_orig = size(im,2)
-    height_orig = size(im,1)   #in display, height is fast direction
+    height_orig = size(im,1)
     
     # Rotate the image matrix
 
     im_new = rotl90(im,div(rot,90))
+    
+    # Scale to nearest to requested size that is multiple of 2
+    # But not smaller
+
+    im_ref = im
+    scale_factor = hsize/size(im_new,2)
+    if scale_factor < 1
+        scale_factor = floor(-1*log2(scale_factor))
+        @debug "Scaling images by 2^$scale_factor"
+        for i in 1:Int(scale_factor)
+            im_new = restrict(im_new)
+            im_ref = restrict(im_ref)
+        end
+        scale_factor = 2.0^(-1*scale_factor)
+    else
+        scale_factor = 1
+    end
+    
+    width_new = size(im_new,2)   #slow direction
+    height_new = size(im_new,1)  #fast direction
+
+    width_ref = size(im_ref,2)
+    height_ref = size(im_ref,1)   #in display, height is fast direction
     
     # Get the beam centre
 
@@ -279,39 +345,37 @@ annotate_check_image(im, rot, incif;border=30,scan_id=nothing,frame_no=nothing) 
     end
     fast_n,slow_n = get_surface_axes(incif)
 
-    # Transform beam centre coordinates
+    # Transform beam centre coordinates; scale and rotation
 
     slow_c = slow_c - width_orig/2
     fast_c = fast_c - height_orig/2
     new_slow_c = cosd(rot)* slow_c + sind(rot)* fast_c
     new_fast_c = -sind(rot)* slow_c + cosd(rot)* fast_c
-    new_slow_c = new_slow_c + width_orig/2
-    new_fast_c = new_fast_c + height_orig/2
-                             
-    # TODO: scale to useful size
-    
-    width_new = size(im_new,2)   #slow direction
-    height_new = size(im_new,1)  #fast direction
+    new_slow_c = scale_factor*new_slow_c + width_new/2
+    new_fast_c = scale_factor*new_fast_c + height_new/2
+    slow_c = scale_factor*(slow_c + width_orig/2)
+    fast_c = scale_factor*(fast_c + height_orig/2)
 
     @debug "Old, new height, width" height_orig width_orig height_new width_new
 
     # Start the drawing
     
-    Luxor.Drawing(width_new+width_orig+border*4,maximum((height_new,height_orig))+border*2+20, :rec)
+    Luxor.Drawing(width_new+width_ref+border*4,maximum((height_new,height_ref))+border*2+20, :rec)
     background("white")
 
     # Place rotated and original images
 
     placeimage(Gray.(im_new),Point(border,border))
-    placeimage(Gray.(im),Point(border*3 + width_new,border))
+    placeimage(Gray.(im_ref),Point(border*3 + width_new,border))
     setcolor("black")
     label("Laboratory frame",0,Point(border+width_new/2,border*2+height_new+10))
-    label("Original",0,Point(border*3+width_new+width_orig/2,border*2+height_orig+10))
+    label("Original",0,Point(border*3+width_new+width_ref/2,border*2+height_ref+10))
     
-    # draw a square for the beam centre
+    # draw a red beam centre
     
     setcolor("red")
     box(Point(new_slow_c+border,new_fast_c+border),4,4,:fill)
+    box(Point(border*3+width_new+slow_c,border+fast_c),4,4,:fill)
     draw_axes(height_new,width_new,rot,(fast_n,slow_n))
     snapshot(fname="$(incif.original_file)"*".png")
 end
@@ -322,24 +386,38 @@ draw_axes(height,width,angle,names;border=30) = begin
     @debug "Rotate a/c wise by " angle
     
     # rotate and origin to corner
+
     origin(width/2+border,height/2+border)
+
+    # show image centre
+    
+    setcolor("green")
+    cropmarks(Point(0,0),4,4)
+
+    # move to axis origin
+
     rotate(deg2rad(-1*angle))
-    translate(Point(-(width+border)/2,-(height+border)/2))
+
+    width_new = abs(cosd(angle)* width + sind(angle)* height)
+    height_new = abs(-sind(angle)* width + cosd(angle)* height)
+
+    translate(Point(-(width_new+border)/2,-(height_new+border)/2))
+    
     # draw some lines
 
     setcolor("black")
     
     # The X coordinate is across (i.e. the slow png direction)
 
-    arrow(O,Point(width/2,0))
+    arrow(O,Point(width_new/2,0))
 
     # And Y is down (i.e. the fast png direction)
 
-    arrow(O,Point(0,(height/2.0)))
+    arrow(O,Point(0,(height_new/2.0)))
 
     # annotate the lines
 
-    translate(Point(width/4.0,0))
+    translate(Point(width_new/4.0,0))
 
     # switch the label on the bottom to get the text upright
     if angle == 180 # slow axis on bottom
@@ -349,7 +427,7 @@ draw_axes(height,width,angle,names;border=30) = begin
     else
 	label(slow,:S)
     end
-    translate(Point(-width/4.0,height/4.0))
+    translate(Point(-width_new/4.0,height_new/4.0))
     if angle == 90  # fast on bottom
         @debug "Rotating $fast"
 	rotate(pi/2)
@@ -445,24 +523,27 @@ Test `incif` for conformance to imgCIF consistency requirements. Meaning of argu
 `savepng`: output annotated check image to a file
 `accum`: accumulate this many frames to make the check image
 """
-run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1) = begin
+run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false) = begin
     ok = true
-    println("Running checks (no image download)")
-    println("="^40*"\n")
-    for (desc,one_test) in test_list
-        print("\nTesting: $desc: ")
-        res = []
-        try
-            res = one_test(incif)
-        catch e
-            @debug "Error during test" e
-            res = [(false,"Unable to carry out test, assume missing or bad value")]
-        end
-        ok = ok & verdict(res)
-    end
-    testimage = [[]]  # for consistency
 
-    if !connected return (ok, testimage) end
+    if !skip
+        println("Running checks (no image download)")
+        println("="^40*"\n")
+        for (desc,one_test) in test_list
+            print("\nTesting: $desc: ")
+            res = []
+            try
+                res = one_test(incif)
+            catch e
+                @debug "Error during test" e
+                res = [(false,"Unable to carry out test, assume missing or bad value")]
+            end
+            ok = ok & verdict(res)
+        end
+        testimage = [[]]  # for consistency
+
+        if !connected return (ok, testimage) end
+    end
     
     # Test archive access
 
@@ -480,7 +561,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
     
     # Test with an image
     
-    if length(test_list_with_img) > 0 && ((ok && images) || always)
+    if (ok && images) || always
         testimage = [[]]
         println("\nRunning checks with downloaded images")
         println("="^40*"\n")
@@ -579,6 +660,9 @@ parse_cmdline(d) = begin
         metavar = ["original","local"]
         action = "append_arg"
         help = "Use <local> file in place of URI <original> (for testing). Use -f to access whole file. All URIs in <filename> must be provided, option may be used multiple times"
+        "--skip"
+        nargs = 0
+        help = "Only check actual images"
         "filename"
         help = "Name of imgCIF data file to check"
         required = true
@@ -607,6 +691,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # Fix loops
 
     fix_loops!(incif[blockname])
+
+    # Fix logic
+
+    if parsed_args["output-png"] parsed_args["check-images"] = true end
     
     result,img = run_img_checks(incif[blockname],
                                 images=parsed_args["check-images"],
@@ -616,7 +704,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 pick = parsed_args["pick"][],
                                 accum = parsed_args["accumulate"][],
                                 subs = subs,
-                                savepng = parsed_args["output-png"]
+                                savepng = parsed_args["output-png"],
+                                skip = parsed_args["skip"]
                                 )
     println("\n====End of Checks====")
     if result exit(0) else exit(1) end

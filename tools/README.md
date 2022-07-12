@@ -9,6 +9,13 @@ This program runs a series of tests on an imgCIF file.
 1. [Install Julia](https://julialang.org/downloads) if you don't already have it.
 2. Copy **all** `.jl` files and `Project.toml` from here to a convenient directory.
 
+### Updating
+
+Overwrite all `.jl` files and `Project.toml` from step 2 above with
+the latest copies from here.  Delete the file `Manifest.toml` from the
+same directory if present as otherwise the latest version of
+`ImgCIFHandler.jl` may not be used.
+
 ### Usage
 
 For help, run `julia image_test.jl --help` after installation. 
@@ -22,9 +29,16 @@ being checked. This
 allows interactive preparation and checking of imgCIF descriptions and archive files without 
 needing to download the whole archive each time the program is run.
 
-### Updating
+### Examples
 
-Overwrite all `.jl` files and `Project.toml` from step 2 above with
-the latest copies from here.  Delete the file `Manifest.toml` from the
-same directory if present as otherwise the latest version of
-`ImgCIFHandler.jl` may not be used.
+```
+julia image_tests.jl --skip -o -s https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 /home/myself/downloads/cbf_b4_1.tar.bz2 b4_master_remote.cif
+```
+
+Do not verify imgCIF metadata (`--skip`), running tests only on the images
+themselves, using 
+local file `/home/myself/downloads/cbf_b4_1.tar.bz2` in place of 
+`https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2` whenever 
+encountered in `b4_master_remote.cif` (`-s` option). Store test image in file
+`b4_master_remote.cif.png` (`-o` option).
+
