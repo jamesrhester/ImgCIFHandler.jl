@@ -9,8 +9,9 @@ using ImgCIFHandler#main
 using ImageInTerminal, Colors,ImageContrastAdjustment
 using ImageTransformations
 using ImageBinarization
+using ImageFiltering
 using ArgParse
-using CrystalInfoFramework,FilePaths,URIs, Tar, Images
+using CrystalInfoFramework,FilePaths,URIs, Tar
 using Luxor
 using Statistics
 
@@ -578,7 +579,7 @@ that correspond to negative values as these are likely to have a different
 meaning.
 """
 find_best_cutoff(im;cut_ratio=1000) = begin
-    edges,bins = build_histogram(im)
+    edges,bins = ImageContrastAdjustment.build_histogram(im)
     # Find largest number of points > 0
     maxpts = 0
     maxpos = 0
@@ -808,7 +809,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-07-12\n")
+    println("\n ImgCIF checker version 2022-07-15\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
