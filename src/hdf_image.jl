@@ -5,7 +5,7 @@ using H5Zblosc,H5Zbzip2,H5Zlz4,H5Zzstd
 
 # Uncomment when H5Zbitshuffle is officially registered
 
-# using H5Zbitshuffle 
+using H5Zbitshuffle 
 
 """
     imgload(handle,::Val{:HDF};path="/";frame=1)
@@ -46,7 +46,11 @@ check_format(loc::AbstractString, ::Val{:HDF5};path="/",frame=1) = begin
     ds = f[path]
     filt_pipeline = HDF5.get_create_properties(ds).filters
     for filt in filt_pipeline
-        filter_id = HDF5.Filters.filterid(typeof(filt))
+        if filt isa HDF5.Filters.ExternalFilter
+            filter_id = HDF5.Filters.filterid(filt)
+        else
+            filter_id = HDF5.Filters.filterid(typeof(filt))
+        end
         if !(filter_id in allowed_filters)
             messages *= "\nFilter ID $(filter_id) used in $loc/$path is not allowed\n"
         end

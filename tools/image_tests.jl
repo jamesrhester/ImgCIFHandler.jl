@@ -8,9 +8,11 @@ Pkg.instantiate()
 using ImgCIFHandler#main
 using ImageInTerminal, Colors,ImageContrastAdjustment
 using ImageTransformations
+using ImageBinarization
 using ArgParse
 using CrystalInfoFramework,FilePaths,URIs, Tar, Images
 using Luxor
+using Statistics
 
 # Tests for imgCIF files
 const test_list = []
@@ -210,6 +212,83 @@ apply_mask!(incif,im::Array{T,2}) where T = begin
 end
 
 """
+    find_peaks(im)
+
+A primitive peak-finding algorithm. No attempt is made to find all
+peaks. All pixels with values less than 1/2000 of the maximum are
+set to zero, then a Niblack binarisation algorithm is applied to
+produce a peak mask, which is reapplied to the original image
+and local maxima found.
+"""
+find_peaks(im) = begin
+
+    # Find the maximum peak (not spurion) intensity
+    
+    maxint = maximum(im)
+    c = argmax(im)
+    avg = ceil(mean(im)) #proxy for background
+    @debug "Assume background is" avg
+    i = 0
+    while true
+        bound_x_lower = max(c[1]-5,1)
+        bound_x_upper = min(c[1]+5,size(im,1))
+        bound_y_lower = max(c[2]-5,1)
+        bound_y_upper = min(c[2]+5,size(im,2))
+        view_area = im[bound_x_lower:bound_x_upper,bound_y_lower:bound_y_upper]
+        @debug "Maximum for $c" maximum(view_area)
+        view_area[argmax(view_area)] = 0
+        if maximum(view_area) > avg
+            @debug "Max nearby" maximum(view_area)
+            break
+        end
+        im[c] = 0
+        maxint = maximum(im)
+        c = argmax(im)
+        i+=1
+        if i>100 break end   #sanity check
+    end
+
+    threshold = maxint/20
+    if threshold < 10  #weak image or no spots?
+        threshold = max(maxint / 2, 10)
+    end
+    t_im = map(x-> x > threshold ? x : eltype(im)(0), im)
+
+    @debug "Maximum, threshold" maxint, threshold
+    # binarize
+
+    binarize!(t_im,Niblack())
+
+    # mask original
+
+    m_im = .*(t_im,im)
+
+    # find local maxima and remove spurious ones
+
+    candidates = findlocalmaxima(m_im)
+
+    maxvals = getindex.(Ref(im),candidates)
+    thresh = maximum(maxvals)/20
+
+    @debug "Peak reject threshold" thresh
+    
+    filter!(candidates) do c
+        bound_x_lower = max(c[1]-10,1)
+        bound_x_upper = min(c[1]+10,size(m_im,1))
+        bound_y_lower = max(c[2]-10,1)
+        bound_y_upper = min(c[2]+10,size(m_im,2))
+        view_area = m_im[bound_x_lower:bound_x_upper,bound_y_lower:bound_y_upper]
+        @debug "Maximum for $c" maximum(view_area)
+
+        # detect and remove single-pixel peaks
+
+        view_area[findlocalmaxima(view_area)[1]] = 0
+        
+        maximum(view_area) > thresh
+    end
+end
+
+"""
     create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true)
 
 Create a contrast enhanced image from the matrix `im`. If `gravity` is true, 
@@ -222,8 +301,14 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
     # First detect mask and set to zero
 
     apply_mask!(incif,im)
+
+    # Get a list of peaks for later
+
+    peaks = find_peaks(im)
+
+    @debug "Peaks found at" peaks
     
-    # First try to improve contrast
+    # Then try to improve contrast
     
     if maximum(im) > 1.0
         im = im/maximum(im)
@@ -288,19 +373,20 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
 
     #im_new = rotl90(im_new,rot)
     
-    return im_new,rot*90
+    return im_new,rot*90,peaks
 end
 
 """
-    annotate_check_image(image,rotation,beam_centre,names,filename; border=30, size=512)
+    annotate_check_image(image,rotation,beam_centre,names,filename; border=30, size=512,peaks=[])
 
 Add axes and beam centre to `image`, saving the result in
 `filename`. `names` contains the names of the fast and slow
 axes, in that order. `border` is the size of the border around
 the image. `hsize` is the target maximum horizontal dimension of the check image,
-in pixels.
+in pixels. `peaks` is a list of the most intense peaks found in the image,
+which should have circles drawn around them.
 """
-annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no=nothing) = begin
+annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no=nothing,peaks=[]) = begin
 
     # In the following there are three images: the original image `im`,
     # the rotated scaled image `im_new` and the reference image
@@ -347,14 +433,10 @@ annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no
 
     # Transform beam centre coordinates; scale and rotation
 
-    slow_c = slow_c - width_orig/2
-    fast_c = fast_c - height_orig/2
-    new_slow_c = cosd(rot)* slow_c + sind(rot)* fast_c
-    new_fast_c = -sind(rot)* slow_c + cosd(rot)* fast_c
-    new_slow_c = scale_factor*new_slow_c + width_new/2
-    new_fast_c = scale_factor*new_fast_c + height_new/2
-    slow_c = scale_factor*(slow_c + width_orig/2)
-    fast_c = scale_factor*(fast_c + height_orig/2)
+    new_slow_c,new_fast_c = calc_new_coords((slow_c,fast_c),rot,scale_factor,width_orig,height_orig)
+    
+    slow_c = scale_factor*slow_c
+    fast_c = scale_factor*fast_c
 
     @debug "Old, new height, width" height_orig width_orig height_new width_new
 
@@ -377,7 +459,41 @@ annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no
     box(Point(new_slow_c+border,new_fast_c+border),4,4,:fill)
     box(Point(border*3+width_new+slow_c,border+fast_c),4,4,:fill)
     draw_axes(height_new,width_new,rot,(fast_n,slow_n))
+    draw_peaks(width_orig,height_orig,scale_factor,rot,peaks)
     snapshot(fname="$(incif.original_file)"*".png")
+end
+
+""" 
+    calc_new_coords(old,rot,scale,width,height)
+
+Calculate the coordinates on the canvas resulting from a rotation in
+degrees of `rot` and scaling of `scale` where the rotation is around
+the centre of an image of `height` and `width`. Original coordinates
+in `old` as (slow,fast) where the slow direction is conventionally
+horizontal and the origin is at pixel (1,1).
+"""
+calc_new_coords(old,rot,scale,width,height) = begin
+
+    @debug "Rotation" rot isodd(div(rot,90))
+    if isodd(div(rot,90))
+        new_width = height*scale
+        new_height = width*scale
+    else
+        new_width = width*scale
+        new_height = height*scale
+    end
+    
+    rot_mat = [cosd(rot) sind(rot); -sind(rot) cosd(rot)]
+    slow,fast = old
+    slow = slow - width/2
+    fast = fast - height/2
+    new_slow,new_fast = scale*rot_mat*[slow,fast] + [new_width/2,new_height/2] 
+
+    @debug "Rotating $old by $rot" rot_mat
+    @debug "New coords" new_slow new_fast
+    @debug "New width, height" new_width new_height
+    
+    return (new_slow,new_fast)
 end
 
 draw_axes(height,width,angle,names;border=30) = begin
@@ -437,6 +553,15 @@ draw_axes(height,width,angle,names;border=30) = begin
 	rotate(-pi/2)
 	label(fast,:S)
     end
+end
+
+draw_peaks(width,height,scale,angle,peaks;border=30) = begin
+    setcolor("blue")
+    origin(Point(border,border))   #top left
+    for op in peaks
+        slow,fast = calc_new_coords((op[2],op[1]),angle,scale,width,height)
+        circle(Point(slow,fast),5,:stroke)
+    end 
 end
 
 show_check_image(im::AbstractArray,rot) = begin
@@ -591,11 +716,11 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
         # Output an image
         
-        new_im,rot = create_check_image(incif,testimage,logscale=false)
+        new_im,rot,peaks = create_check_image(incif,testimage,logscale=false)
         imgfn = nothing
         if savepng
             scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
-            annotate_check_image(new_im,rot,incif,scan_id=scan_id,frame_no=frame_no)
+            annotate_check_image(new_im,rot,incif,scan_id=scan_id,frame_no=frame_no,peaks=peaks)
         else
             show_check_image(new_im,rot)
         end
