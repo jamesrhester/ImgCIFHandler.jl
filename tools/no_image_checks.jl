@@ -184,24 +184,24 @@ end
             end
         end
         
-        numsteps = range/stepsize + 1
+        numframes = range/stepsize
 
-        # Look up how many steps should be there
+        # Look up how many frames should be there
 
         if cn*"scan_id" in names(scan_loop)
             scan_id = getproperty(or,cn*"scan_id")
             scan_info = incif[Dict("_diffrn_scan.id"=>scan_id)]
-            nosteps = parse(Float64,scan_info[1,"_diffrn_scan.frames"])
+            noframes = parse(Float64,scan_info[1,"_diffrn_scan.frames"])
         else
             scan_id = "Scan01"
-            nosteps = parse(Float64,incif["_diffrn_scan.frames"][])
+            noframes = parse(Float64,incif["_diffrn_scan.frames"][])
         end
 
         # And now check
-        if abs(nosteps - numsteps) > 0.3
-            push!(messages,(false,"Range/increment do not match number of steps $nosteps for scan $scan_id, expected $numsteps"))
+        if abs(noframes - numframes) > 0.3
+            push!(messages,(false,"Range $range/increment $stepsize do not match number of frames $noframes for scan $scan_id, expected $numframes"))
         else
-            push!(messages,(true,"Range/increment match number of steps $nosteps for scan $scan_id (expected $numsteps)"))
+            push!(messages,(true,"Range/increment match number of frames $noframes for scan $scan_id (expected $numframes)"))
         end
     end
     return messages
