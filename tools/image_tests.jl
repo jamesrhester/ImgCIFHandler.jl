@@ -323,7 +323,7 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
 
     # Adjust geometry if we know gravity
 
-    if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,0 end
+    if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,0,[] end
 
     gravity = indexin(["gravity"],incif["_axis.equipment"])[]
     grav_vec = parse.(Float64,
