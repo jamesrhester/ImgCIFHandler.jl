@@ -33,6 +33,26 @@ explicitly defined in the file.
 """
 get_detector_axis_settings(imgcif::CifContainer,scanid,frameno) = begin
     axis_names, axis_types = get_detector_axes(imgcif)
+    get_axis_settings(imgcif,scanid,frameno,axis_names,axis_types)
+end
+
+# Version given a filename
+get_detector_axis_settings(filename::AbstractString,args...) = begin
+    get_detector_axis_settings(first(Cif(Path(filename),native=true)).second,args...)
+end
+
+# Version if no scanid or frameid
+get_detector_axis_settings(imgcif::CifContainer) = begin
+    axis_names,axis_types = get_detector_axes(imgcif)
+    return axis_names,axis_types,fill(0.0,length(axis_names))
+end
+
+get_gonio_axis_settings(imgcif::CifContainer,scanid,frameno) = begin
+    axis_names,axis_types = get_gonio_axes(imgcif)
+    get_axis_settings(imgcif,scanid,frameno,axis_names,axis_types)
+end
+
+get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types) = begin
     if haskey(imgcif,"_diffrn_scan_frame_axis.axis_id")
         return get_explicit_frame(imgcif,scanid,frameno)
     end
@@ -70,17 +90,6 @@ get_detector_axis_settings(imgcif::CifContainer,scanid,frameno) = begin
     return axis_names,axis_types,positions
 end
 
-# Version given a filename
-get_detector_axis_settings(filename::AbstractString,args...) = begin
-    get_detector_axis_settings(first(Cif(Path(filename),native=true)).second,args...)
-end
-
-# Version if no scanid or frameid
-get_detector_axis_settings(imgcif::CifContainer) = begin
-    axis_names,axis_types = get_detector_axes(imgcif)
-    return axis_names,axis_types,fill(0.0,length(axis_names))
-end
-
 """
     get_gonio_axes(imgcif::CifContainer;check=false)
 
@@ -99,7 +108,7 @@ end
     get_surface_axes(imgcif::CifContainer)
 
 Return the axis names describing the detector surface and return in order
-fast,slow
+fast,slow.
 """
 get_surface_axes(incif::CifContainer) = begin
     names = incif["_array_structure_list_axis.axis_id"]
@@ -111,6 +120,23 @@ get_surface_axes(incif::CifContainer) = begin
     axis_id = prec_axis_set[speeds]
     axis_name_ind = indexin(axis_id,axis_sets)
     fast,slow = String.(names[axis_name_ind])
+end
+
+"""
+    get_axis_vector(incif::CifContainer,axis_id)
+
+Return the direction of `axis_id`
+"""
+get_axis_vector(incif::CifContainer,axis_id) = begin
+    axis_loop = get_loop(incif,"_axis.id")
+    filt_ax = filter(row->row["_axis.id"]==axis_id,axis_loop)
+    if size(filt_ax,1) != 1
+        throw(error("Axis name $axis_id is not defined in $(incif.original_file)"))
+    end
+    s = "_axis.vector"
+    map([1,2,3]) do i
+        parse(Float64,filt_ax[!,"$s[$i]"][])
+    end
 end
 
 """

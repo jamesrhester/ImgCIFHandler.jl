@@ -42,6 +42,7 @@ export get_gonio_axes
 export get_pixel_coordinates
 export get_surface_axes #get the axes used to locate pixels on the detector
 export get_id_sequence #get a list of sequential binary ids from the same scan
+export get_axis_vector #get the vector for an axis_id
 
 include("hdf_image.jl")
 include("cbf_image.jl")

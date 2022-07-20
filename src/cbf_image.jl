@@ -16,6 +16,7 @@ using CBFlib_small_jll
 # be something that libcbf can update.
 
 mutable struct CBF_Handle_Struct end
+mutable struct CBF_Gonio_Struct end
 
 # cbflib expects us to allocate the memory for CBF Detectors
 mutable struct CBF_Detector_Struct
@@ -36,6 +37,10 @@ mutable struct Det_Handle
     handle::Ptr{CBF_Detector_Struct}
 end
 
+mutable struct Gonio_Handle
+    handle::Ptr{CBF_Gonio_Struct}
+end
+
 cbf_make_handle() = begin
     handle = CBF_Handle(0)
     finalizer(cbf_free_handle!,handle)
@@ -53,6 +58,20 @@ cbf_free_handle!(handle::CBF_Handle) = begin
     err_no = ccall((:cbf_free_handle,libcbf),Cint,(Ptr{CBF_Handle_Struct},),handle.handle)
     cbf_error(err_no, extra = "while finalising")
     return 0
+end
+
+cbf_construct_goniometer(handle::CBF_Handle) = begin
+    gonio = CBF_Gonio_Struct(0)
+    finalizer(cbf_free_goniometer!,gonio)
+    err_no = ccall((:cbf_construct_goniometer,libcbf),Cint,
+                   (Ptr{CBF_Handle_Struct},Ptr{CBF_Gonio_Struct},),handle.handle,gonio.handle)
+    cbf_error(err_no, extra = "while constructing goniometer")
+    return gonio
+end
+
+cbf_free_goniometer!(handle::CBF_Gonio_Struct) = begin
+    err_no = ccall((:cbf_free_goniometer,libcbf),Cint,(Ptr{CBF_Gonio_Struct},),handle.handle)
+    cbf_error(err_no, extra = "while freeing goniometer")
 end
 
 cbf_read_file(filename) = begin
@@ -448,8 +467,17 @@ cbf_get_integerarray(handle,data_array) = begin
     return num_read[]
 end
 
+cbf_get_wavelength(handle) = begin
+    wave = Ref{Cdouble}(0)
+    err_no = ccall((:cbf_get_wavelength,libcbf),Cint,
+                   (Ptr{CBF_Handle_Struct},Ref{Cdouble}),
+                   handle.handle,wave)
+    cbf_error(err_no, extra = "while getting wavelength")
+    return wave[]
+end
+
 #
-#  Extra routines just because they are useful
+#  High-level routines
 #
 
 cbf_get_beam_center(handle) = begin
@@ -484,6 +512,78 @@ cbf_get_pixel_coordinates(handle,slowcoord,fastcoord) = begin
     cbf_error(err_no, extra = "while getting pixel coordinate $slowcoord,$fastcoord")
     return coordx[],coordy[],coordz[]
 end
+
+cbf_get_rotation_axis(handle::CBF_Gonio_Struct) = begin
+    coordx = Ref{Float64}(0.0)
+    coordy = Ref{Float64}(0.0)
+    coordz = Ref{Float64}(0.0)
+    err_no = ccall((:cbf_get_rotation_axis,libcbf),Cint,
+                   (Ptr{CBF_Gonio_Struct},
+                   Cuint,
+                   Ref{Cdouble},
+                   Ref{Cdouble},
+                   Ref{Cdouble}),
+                   handle.handle,0,coordx,coordy,coordz)
+    cbf_error(err_no, extra = "while getting rotation axis")
+    return coordx[],coordy[],coordz[]
+end
+
+cbf_get_rotation_range(handle::CBF_Gonio_Struct) = begin
+    start = Ref{Cdouble}(0)
+    increment = Ref{Cdouble}(0)
+    err_no = ccall((:cbf_get_rotation_range,libcbf),Cint,
+                   (Ptr{CBF_Gonio_Struct},
+                   Cuint,
+                   Ref{Cdouble},
+                   Ref{Cdouble},),
+                   handle.handle,0,start,increment)
+    cbf_error(err_no, extra = "while getting rotation range")
+    return start[],increment[]
+end
+
+cbf_rotate_vector(handle::CBF_Gonio_Struct,ratio,initial) = begin
+    final = Vector{Cdouble}[0,0,0]
+    err_no = ccall((:cbf_rotate_vector,libcbf),Cint,
+                   (Ptr{CBF_Gonio_Struct},
+                    Cuint,
+                    Cdouble,
+                    Cdouble,
+                    Cdouble,
+                    Cdouble,
+                    Ref{Cdouble},
+                    Ref{Cdouble},
+                    Ref{Cdouble}
+                    ),
+                   handle.handle,0,ratio,initial[1],initial[2],initial[3],
+                   final[1],final[2],final[3])
+    cbf_error(err_no, extra = "while rotating vector")
+    return final
+end
+
+cbf_get_reciprocal(handle::CBF_Gonio_Struct,ratio,wavelength,realspace) = begin
+    final = Vector{Cdouble}[0,0,0]
+    err_no = ccall((:cbf_get_reciprocal,libcbf),Cint,
+                   (Ptr{CBF_Gonio_Struct},
+                    Cuint,
+                    Cdouble,
+                    Cdouble,
+                    Cdouble,
+                    Cdouble,
+                    Cdouble,
+                    Ref{Cdouble},
+                    Ref{Cdouble},
+                    Ref{Cdouble}
+                    ),
+                   handle.handle,0,ratio,wavelength,
+                   realspace[1],realspace[2],realspace[3],
+                   final[1],final[2],final[3])
+    cbf_error(err_no, extra = "while getting reciprocal space vector")
+    return final
+end
+
+#
+#  End of low-level interface to CBFlib
+#
 
 """
     imgload(filename,::Val{:CBF})
@@ -605,6 +705,36 @@ end
 get_pixel_coordinates(incif::CifContainer,args...) = begin
     filename = "$(incif.original_file)"
     get_pixel_coordinates(filename,args...)
+end
+
+"""
+    get_recip_point(filename::AbstractString,slow,fast,args...)
+
+Return the reciprocal lattice coordinates of the pixel with coordinates
+`slow,fast`. Wavelength is obtained from the provided file
+"""
+get_recip_point(filename::AbstractString,slow,fast,args...) = begin
+
+    # Get 3D position of pixel
+    
+    pixel_coord = get_pixel_coordinates(filename,slow,fast,args...)
+
+    # Set up goniometer at right position
+    
+    cbf_handle = cbf_read_file(filename)
+    axis_names,types,pos = get_gonio_axis_settings(filename,args...)
+    cbf_set_axis_positions(cbf_handle,axis_names,types,pos)
+
+    @debug "Set axes to" axis_names types pos
+
+    gh = cbf_construct_goniometer(cbf_handle)
+
+    # Get the reciprocal coordinates
+
+    wavel = cbf_get_wavelength(cbf_handle)
+    recip = cbf_get_reciprocal(gh,0.5,wavel,pixel_coord)
+
+    return recip
 end
 
 cbf_error(val;extra="") = begin

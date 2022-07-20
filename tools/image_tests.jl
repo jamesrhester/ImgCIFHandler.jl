@@ -290,14 +290,34 @@ find_peaks(im) = begin
 end
 
 """
-    create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true)
+    improve_contrast(im;cut_ratio=1000)
+
+Return a new image that has contrast-enhanced `im`. See
+`find_best_cutoff` for meaning of `cut_ratio`
+"""
+improve_contrast(im;cut_ratio=1000) = begin
+    clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
+    alg = LinearStretching(src_maxval = clamp_high)
+    im_new = adjust_histogram(im,alg)
+    alg = Equalization(nbins=256,maxval = maximum(im))
+    im_new = adjust_histogram(im_new,alg)
+    
+    @debug "Max, min for adjusted image:" maximum(im_new) minimum(im_new)
+
+    return im_new
+end
+
+"""
+    create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,
+                                peaks=false)
 
 Create a contrast enhanced image from the matrix `im`. If `gravity` is true, 
 information in `incif` is used, if available, to calculate the rotation
 of the image so that down on the image 
 becomes down in real space. Returns the unrotated image and the rotation.
+If `peaks` is true, peaks are searched for.
 """
-create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
+create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,peaks=false) = begin
 
     # First detect mask and set to zero
 
@@ -310,35 +330,39 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
     @debug "Peaks found at" peaks
     
     # Then try to improve contrast
-    
     if maximum(im) > 1.0
         im = im/maximum(im)
     end
-    clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
-    alg = LinearStretching(src_maxval = clamp_high)
-    im_new = adjust_histogram(im,alg)
-    alg = Equalization(nbins=256,maxval = maximum(im))
-    im_new = adjust_histogram(im_new,alg)
-    @debug "Max, min for adjusted image:" maximum(im_new) minimum(im_new)
 
+    im_new = improve_contrast(im)
+
+    # Make sure the image is that seen from the front of the
+    # detector. The image is presented by image display tools
+    # with the origin at top left, with fast direction down.
+    # So if slow is across, fast down, the cross product is
+    # the view direction. View direction should be [0,0,-1]
+    # for away from source in imgCIF coordinates.
+
+    fast_v,slow_v = get_axis_vector.(Ref(incif),get_surface_axes(incif))
+    view_d = slow_v[1]*fast_v[2] - slow_v[2]*fast_v[1] #z comp of cross product
+    do_transpose = view_d > 0   # need to transpose
+    
     # Adjust geometry if we know gravity
 
     if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,0,[] end
 
     gravity = indexin(["gravity"],incif["_axis.equipment"])[]
-    grav_vec = parse.(Float64,
-                      [
-                          incif["_axis.vector[1]"][gravity],
-                          incif["_axis.vector[2]"][gravity],
-                          incif["_axis.vector[3]"][gravity],
-                      ]
-                      )
+    grav_vec = get_axis_vector(incif,incif["_axis.id"][gravity])
     norm_grav = sqrt(grav_vec[1]^2+grav_vec[2]^2)
     grav_vec = grav_vec/norm_grav
     
     corner_loc = get_pixel_coordinates(incif,0,0)
-    fast_dir = get_pixel_coordinates(incif,0,1) - corner_loc
-
+    if !do_transpose
+        fast_dir = get_pixel_coordinates(incif,0,1) - corner_loc
+    else
+        fast_dir = get_pixel_coordinates(incif,1,0) - corner_loc
+    end
+    
     norm_fast = sqrt(fast_dir[1]^2+fast_dir[2]^2)
     fast_dir = fast_dir/norm_fast
 
@@ -374,31 +398,38 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true) = begin
 
     #im_new = rotl90(im_new,rot)
     
-    return im_new,rot*90,peaks
+    return im_new,do_transpose,rot*90,peaks
 end
 
 """
-    annotate_check_image(image,rotation,beam_centre,names,filename; border=30, size=512,peaks=[])
+    annotate_check_image(image,transpose,rotation,beam_centre,names,filename; border=30, hsize=512,peaks=[],scan_id=nothing,frame_no=nothing)
 
-Add axes and beam centre to `image`, saving the result in
-`filename`. `names` contains the names of the fast and slow
-axes, in that order. `border` is the size of the border around
+Add axes and beam centre to `image`, saving the result in `filename`. Metadata 
+relating to the image is read from `incif`, and the final image is rotated by `rot`
+and (prior to this) transposed if `transp` is true.
+`border` is the size of the border around
 the image. `hsize` is the target maximum horizontal dimension of the check image,
 in pixels. `peaks` is a list of the most intense peaks found in the image,
-which should have circles drawn around them.
+which should have circles drawn around them. If `scan_id` and `frame_no` are
+not `nothing`, they are used to calculate the beam centre for the corresponding
+detector position, otherwise the beam centre for zero detector motion is used.
 """
-annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no=nothing,peaks=[]) = begin
+annotate_check_image(im, transp, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no=nothing,peaks=[]) = begin
 
     # In the following there are three images: the original image `im`,
-    # the rotated scaled image `im_new` and the reference image
+    # the transposed rotated scaled image `im_new` and the reference image
     # next to it `im_ref`
     
     width_orig = size(im,2)
     height_orig = size(im,1)
     
-    # Rotate the image matrix
+    # Transpose and rotate the image matrix
 
-    im_new = rotl90(im,div(rot,90))
+    if transp
+        im_new = rotl90(permutedims(im),div(rot,90))
+    else
+        im_new = rotl90(im,div(rot,90))
+    end
     
     # Scale to nearest to requested size that is multiple of 2
     # But not smaller
@@ -430,11 +461,10 @@ annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no
     else
         _,_,slow_c,fast_c = get_beam_centre(incif,scan_id,frame_no)
     end
-    fast_n,slow_n = get_surface_axes(incif)
 
     # Transform beam centre coordinates; scale and rotation
 
-    new_slow_c,new_fast_c = calc_new_coords((slow_c,fast_c),rot,scale_factor,width_orig,height_orig)
+    new_slow_c,new_fast_c = calc_new_coords((slow_c,fast_c),transp,rot,scale_factor,width_orig,height_orig)
     
     slow_c = scale_factor*slow_c
     fast_c = scale_factor*fast_c
@@ -459,37 +489,46 @@ annotate_check_image(im, rot, incif;border=30,hsize=512,scan_id=nothing,frame_no
     setcolor("red")
     box(Point(new_slow_c+border,new_fast_c+border),4,4,:fill)
     box(Point(border*3+width_new+slow_c,border+fast_c),4,4,:fill)
-    draw_axes(height_new,width_new,rot,(fast_n,slow_n))
-    draw_peaks(width_orig,height_orig,scale_factor,rot,peaks)
+
+    # draw the axis labels
+    
+    ax_labels = get_surface_axes(incif)
+    if transp ax_labels = reverse(ax_labels) end
+    draw_axes(height_new,width_new,rot,ax_labels)
+    draw_peaks(width_orig,height_orig,scale_factor,transp,rot,peaks)
     snapshot(fname="$(incif.original_file)"*".png")
 end
 
 """ 
-    calc_new_coords(old,rot,scale,width,height)
+    calc_new_coords(old,transp,rot,scale,width,height)
 
-Calculate the coordinates on the canvas resulting from a rotation in
+Calculate the coordinates on the canvas resulting from a possible
+transpose (boolean `transp`) followed by rotation in
 degrees of `rot` and scaling of `scale` where the rotation is around
 the centre of an image of `height` and `width`. Original coordinates
 in `old` as (slow,fast) where the slow direction is conventionally
 horizontal and the origin is at pixel (1,1).
 """
-calc_new_coords(old,rot,scale,width,height) = begin
+calc_new_coords(old,transp,rot,scale,width,height) = begin
 
     @debug "Rotation" rot isodd(div(rot,90))
-    if isodd(div(rot,90))
+    if isodd(div(rot,90)) && !transp || transp && iseven(div(rot,90))
         new_width = height*scale
         new_height = width*scale
     else
         new_width = width*scale
         new_height = height*scale
     end
-    
-    rot_mat = [cosd(rot) sind(rot); -sind(rot) cosd(rot)]
+
+    trans_mat = transp ? [0 1; 1 0] : [1 0; 0 1]
     slow,fast = old
     slow = slow - width/2
     fast = fast - height/2
-    new_slow,new_fast = scale*rot_mat*[slow,fast] + [new_width/2,new_height/2] 
 
+    rot_mat = [cosd(rot) sind(rot); -sind(rot) cosd(rot)]
+    new_slow,new_fast = scale*rot_mat*trans_mat*[slow,fast] + [new_width/2,new_height/2] 
+
+    @debug "Transpose" transpose
     @debug "Rotating $old by $rot" rot_mat
     @debug "New coords" new_slow new_fast
     @debug "New width, height" new_width new_height
@@ -556,17 +595,18 @@ draw_axes(height,width,angle,names;border=30) = begin
     end
 end
 
-draw_peaks(width,height,scale,angle,peaks;border=30) = begin
+draw_peaks(width,height,scale,transp,angle,peaks;border=30) = begin
     setcolor("blue")
     origin(Point(border,border))   #top left
     for op in peaks
-        slow,fast = calc_new_coords((op[2],op[1]),angle,scale,width,height)
+        slow,fast = calc_new_coords((op[2],op[1]),transp,angle,scale,width,height)
         circle(Point(slow,fast),5,:stroke)
     end 
 end
 
-show_check_image(im::AbstractArray,rot) = begin
+show_check_image(im::AbstractArray,transp,rot) = begin
     println("Image for checking")
+    if transp im = permutedims(im) end
     imshow(Gray.(rotl90(im,div(rot,90))))
     println("\n")
 end
@@ -717,14 +757,15 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
         # Output an image
         
-        new_im,rot,peaks = create_check_image(incif,testimage,logscale=false)
+        new_im,transp,rot,peaks = create_check_image(incif,testimage,logscale=false)
         imgfn = nothing
         if savepng
             scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
-            annotate_check_image(new_im,rot,incif,scan_id=scan_id,frame_no=frame_no,peaks=peaks)
+            annotate_check_image(new_im,transp,rot,incif,scan_id=scan_id,frame_no=frame_no,peaks=peaks)
         else
-            show_check_image(new_im,rot)
+            show_check_image(new_im,transp,rot)
         end
+        
         # Run the image checks
         
         for (desc,one_test) in test_list_with_img
@@ -809,7 +850,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-07-16\n")
+    println("\n ImgCIF checker version 2022-07-20\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
