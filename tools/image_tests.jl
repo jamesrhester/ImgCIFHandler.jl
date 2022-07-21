@@ -349,7 +349,7 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,peaks=fals
     
     # Adjust geometry if we know gravity
 
-    if !gravity || !("gravity" in incif["_axis.equipment"]) im_new,do_transpose,0,[] end
+    if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,do_transpose,0,[] end
 
     gravity = indexin(["gravity"],incif["_axis.equipment"])[]
     grav_vec = get_axis_vector(incif,incif["_axis.id"][gravity])
