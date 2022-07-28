@@ -19,6 +19,8 @@ mutable struct CBF_Handle_Struct end
 mutable struct CBF_Gonio_Struct end
 
 # cbflib expects us to allocate the memory for CBF Detectors
+# and CBF goniometers
+
 mutable struct CBF_Detector_Struct
     cbf_positioner::Ptr{Cvoid}
     displacement::NTuple{2,Float64}
@@ -61,17 +63,17 @@ cbf_free_handle!(handle::CBF_Handle) = begin
 end
 
 cbf_construct_goniometer(handle::CBF_Handle) = begin
-    gonio = CBF_Gonio_Struct(0)
-    finalizer(cbf_free_goniometer!,gonio)
+    gh = Gonio_Handle(0)
     err_no = ccall((:cbf_construct_goniometer,libcbf),Cint,
-                   (Ptr{CBF_Handle_Struct},Ptr{CBF_Gonio_Struct},),handle.handle,gonio.handle)
+                   (Ptr{CBF_Handle_Struct},Ref{Gonio_Handle},),handle.handle,gh)
     cbf_error(err_no, extra = "while constructing goniometer")
-    return gonio
+    finalizer(cbf_free_goniometer!,gh)
+    return gh
 end
 
-cbf_free_goniometer!(handle::CBF_Gonio_Struct) = begin
+cbf_free_goniometer!(handle::Gonio_Handle) = begin
     err_no = ccall((:cbf_free_goniometer,libcbf),Cint,(Ptr{CBF_Gonio_Struct},),handle.handle)
-    cbf_error(err_no, extra = "while freeing goniometer")
+    cbf_error(err_no, extra = "while freeing goniometer, possible memory leak")
 end
 
 cbf_read_file(filename) = begin
@@ -216,21 +218,18 @@ missing from the `diffrn_scan_frame_axis` and `diffrn_scan_axis` loops
 """
 cbf_set_axis_positions(handle::CBF_Handle,names,types,positions) = begin
 
-    @debug names,types,positions
+    # @debug names,types,positions
     for (an,at,ap) in zip(names,types,positions)
         cbf_require_category(handle,"diffrn_scan_frame_axis")
         cbf_require_column(handle,"axis_id")
         if !cbf_find_row(handle,an)
             cbf_new_row(handle)
-            @debug "Setting value to" an
             cbf_set_value(handle,an)
             if at=="rotation"
                 cbf_require_column(handle,"angle")
-                @debug "Setting angular value to " ap
                 cbf_set_value(handle,"$ap")
             else
                 cbf_require_column(handle,"displacement")
-                @debug "Setting translation to " ap
                 cbf_set_value(handle,"$ap")
             end
         end
@@ -241,7 +240,6 @@ cbf_set_axis_positions(handle::CBF_Handle,names,types,positions) = begin
         cbf_require_column(handle,"axis_id")
         if !cbf_find_row(handle,an)
             cbf_new_row(handle)
-            @debug "diffrn_scan_axis" an
             cbf_set_value(handle,an)
             if at == "rotation"
                 cbf_require_column(handle,"angle_increment")
@@ -268,7 +266,6 @@ cbf_fix_detector_axes(handle,axis_names) = begin
     if haveit && cbf_count_rows(handle) > 1 return end
     cbf_find_column(handle,"id")
     detname = cbf_get_string_value(handle)
-    @debug detname
     
     # And for consistency number of axes should be true
     # Assume two axes on detector surface
@@ -287,6 +284,27 @@ cbf_fix_detector_axes(handle,axis_names) = begin
             cbf_require_column(handle,"detector_id")
             cbf_set_value(handle,detname)
         end
+    end
+end
+
+"""
+    Set the measurement axis so that cbflib can find it
+"""
+cbf_fix_measurement_axis(handle,axis_name) = begin
+
+    # First find the measurement id
+
+    cbf_find_category(handle,"diffrn_measurement")
+    cbf_find_column(handle,"id")
+    meas_id = cbf_get_string_value(handle)
+
+    cbf_require_category(handle,"diffrn_measurement_axis")
+    cbf_require_column(handle,"axis_id")
+    if !cbf_find_row(handle,axis_name)
+        cbf_new_row(handle)
+        cbf_set_value(handle,axis_name)
+        cbf_require_column(handle,"measurement_id")
+        cbf_set_value(handle,meas_id)
     end
 end
 
@@ -313,7 +331,6 @@ add_default_items(handle::CBF_Handle,itemlist) = begin
             if cbf_find_category(handle,origin_cat)
                 if cbf_count_rows(handle) == 1 && cbf_find_column(handle,origin_obj)
                     def_val = cbf_get_string_value(handle)
-                    @debug "Found $def_val for $origin_item"
                 end
             else
                 @debug "No category for $origin_item"
@@ -328,7 +345,7 @@ add_default_items(handle::CBF_Handle,itemlist) = begin
 
         if !cbf_find_column(handle,obj)
             cbf_require_column(handle,obj)
-            @debug "Adding $one_item to $nrows rows"
+            # @debug "Adding $one_item to $nrows rows"
             if nrows == 0
                 cbf_set_value(handle,def_val)
             else
@@ -337,8 +354,6 @@ add_default_items(handle::CBF_Handle,itemlist) = begin
                     cbf_next_row(handle)
                 end
             end
-        else
-            @debug "$one_item already present"
         end
     end
 
@@ -360,7 +375,9 @@ make_nice_for_cbf(handle::CBF_Handle) = begin
                   ("_diffrn_detector_element.detector_id","_diffrn_detector.id"),
                   ("_diffrn_detector_element.id","ELEMENT"),
                   ("_diffrn_data_frame.array_id","_array_structure.id"),
-                  ("_diffrn_data_frame.detector_element_id","_diffrn_detector_element.id")]
+                  ("_diffrn_data_frame.detector_element_id","_diffrn_detector_element.id"),
+                  ("_diffrn_measurement.diffrn_id","_diffrn.id"),
+                  ("_diffrn_measurement.id","GONIOMETER")]
 
     add_default_items(handle,need_items)
     
@@ -485,7 +502,6 @@ cbf_get_beam_center(handle) = begin
     index2 = Ref{Float64}(0.0)
     centre1 = Ref{Float64}(0.0)
     centre2 = Ref{Float64}(0.0)
-    @debug "Det info is: $(handle.handle)"
     err_no = ccall((:cbf_get_beam_center,libcbf),Cint,
                    (Ptr{CBF_Detector_Struct},
                     Ref{Float64},
@@ -513,7 +529,7 @@ cbf_get_pixel_coordinates(handle,slowcoord,fastcoord) = begin
     return coordx[],coordy[],coordz[]
 end
 
-cbf_get_rotation_axis(handle::CBF_Gonio_Struct) = begin
+cbf_get_rotation_axis(handle::Gonio_Handle) = begin
     coordx = Ref{Float64}(0.0)
     coordy = Ref{Float64}(0.0)
     coordz = Ref{Float64}(0.0)
@@ -528,7 +544,7 @@ cbf_get_rotation_axis(handle::CBF_Gonio_Struct) = begin
     return coordx[],coordy[],coordz[]
 end
 
-cbf_get_rotation_range(handle::CBF_Gonio_Struct) = begin
+cbf_get_rotation_range(handle::Gonio_Handle) = begin
     start = Ref{Cdouble}(0)
     increment = Ref{Cdouble}(0)
     err_no = ccall((:cbf_get_rotation_range,libcbf),Cint,
@@ -541,8 +557,10 @@ cbf_get_rotation_range(handle::CBF_Gonio_Struct) = begin
     return start[],increment[]
 end
 
-cbf_rotate_vector(handle::CBF_Gonio_Struct,ratio,initial) = begin
-    final = Vector{Cdouble}[0,0,0]
+cbf_rotate_vector(handle::Gonio_Handle,ratio,initial) = begin
+    final1 = Ref{Cdouble}(0)
+    final2 = Ref{Cdouble}(0)
+    final3 = Ref{Cdouble}(0)
     err_no = ccall((:cbf_rotate_vector,libcbf),Cint,
                    (Ptr{CBF_Gonio_Struct},
                     Cuint,
@@ -555,13 +573,15 @@ cbf_rotate_vector(handle::CBF_Gonio_Struct,ratio,initial) = begin
                     Ref{Cdouble}
                     ),
                    handle.handle,0,ratio,initial[1],initial[2],initial[3],
-                   final[1],final[2],final[3])
+                   final1,final2,final3)
     cbf_error(err_no, extra = "while rotating vector")
-    return final
+    return [final1[],final2[],final3[]]
 end
 
-cbf_get_reciprocal(handle::CBF_Gonio_Struct,ratio,wavelength,realspace) = begin
-    final = Vector{Cdouble}[0,0,0]
+cbf_get_reciprocal(handle::Gonio_Handle,ratio,wavelength,realspace) = begin
+    final1 = Ref{Cdouble}(0)
+    final2 = Ref{Cdouble}(0)
+    final3 = Ref{Cdouble}(0)
     err_no = ccall((:cbf_get_reciprocal,libcbf),Cint,
                    (Ptr{CBF_Gonio_Struct},
                     Cuint,
@@ -576,9 +596,68 @@ cbf_get_reciprocal(handle::CBF_Gonio_Struct,ratio,wavelength,realspace) = begin
                     ),
                    handle.handle,0,ratio,wavelength,
                    realspace[1],realspace[2],realspace[3],
-                   final[1],final[2],final[3])
+                   final1,final2,final3)
     cbf_error(err_no, extra = "while getting reciprocal space vector")
-    return final
+    return [final1[],final2[],final3[]]
+end
+
+"""
+    cbf_get_axis_poise(handle::CBF_Handle,axis_id)
+
+Return the direction in which `axis_id` is pointing for the angular
+settings of `handle`. We assume cbflib will search first in
+_diffrn_scan_frame_axis for information, which must be present or
+have been placed there earlier. If this is not true, results may
+be wrong.
+"""
+cbf_get_axis_poise(handle::CBF_Handle,axis_id) = begin
+    vector1 = Ref{Cdouble}(0)
+    vector2 = Ref{Cdouble}(0)
+    vector3 = Ref{Cdouble}(0)
+    offset1 = Ref{Cdouble}(0)
+    offset2 = Ref{Cdouble}(0)
+    offset3 = Ref{Cdouble}(0)
+    angle = Ref{Cdouble}(0)
+    err_no = ccall((:cbf_get_axis_poise,libcbf),Cint,
+                   (Ptr{CBF_Handle_Struct},
+                    Cdouble,   #ratio = 0.5
+                    Ref{Cdouble},   #vector1
+                    Ref{Cdouble},
+                    Ref{Cdouble},
+                    Ref{Cdouble},   #offset1
+                    Ref{Cdouble},
+                    Ref{Cdouble},
+                    Ref{Cdouble},   #angle
+                    Cstring,
+                    Cstring
+                    ),
+                   handle.handle,0.5,
+                   vector1,vector2,vector3,
+                   offset1,offset2,offset3,
+                   angle,axis_id,"."
+                   )
+    cbf_error(err_no, extra = "while getting axis poise for $axis_id")
+    return [vector1[],vector2[],vector3[]],[offset1[],offset2[],offset3[]]
+end
+
+"""
+    cbf_get_detector_normal(handle::CBF_Detector)
+
+Return the normal to the detector.
+"""
+cbf_get_detector_normal(handle) = begin
+    n1 = Ref{Cdouble}(0)
+    n2 = Ref{Cdouble}(0)
+    n3 = Ref{Cdouble}(0)
+    err_no = ccall((:cbf_get_detector_normal,libcbf),Cint,
+                   (Ptr{CBF_Detector_Struct},
+                    Ref{Cdouble},
+                    Ref{Cdouble},
+                    Ref{Cdouble}),
+                   handle.handle,n1,n2,n3
+                   )
+    cbf_error(err_no, extra = "while getting detector normal")
+    return [n1[],n2[],n3[]]
 end
 
 #
@@ -639,8 +718,6 @@ prepare_detector(filename,args...) = begin
     cbf_fix_detector_axes(handle,axis_names)
 
     make_nice_for_cbf(handle)
-
-    @debug "Set axes to" axis_names types postns
     
     # now go and find them
 
@@ -650,16 +727,31 @@ prepare_detector(filename,args...) = begin
                                      0,(0,0),handle.handle,
                                    0)
     det_handle = Det_Handle(pointer_from_objref(det_data))
-    @debug "Det handle: $det_handle, $(pointer_from_objref(det_handle))"
-    @debug "det data: $(pointer_from_objref(det_data))"
     err_no = ccall((:cbf_construct_detector,libcbf),Cint,
                    (Ptr{CBF_Handle_Struct},
                     Ref{Det_Handle},
                     Cuint),
                    handle.handle,det_handle,0)
     cbf_error(err_no, extra = "while constructing detector")
-    @debug "Det info is: $det_data"
     return det_handle,det_data
+end
+
+"""
+    prepare_gonio(cbf_handle,scan_id,frame_no)
+
+Prepare a CBFgoniometer object.
+"""
+prepare_gonio(filename::AbstractString,scan_id,frame_no) = begin
+
+    handle = cbf_read_file(filename)
+    make_nice_for_cbf(handle)
+    axis_names,types,postns = get_gonio_axis_settings(filename,scan_id,frame_no)
+    meas_axis = get_measurement_axis(filename,scan_id)
+    cbf_set_axis_positions(handle,axis_names,types,postns)
+    cbf_fix_measurement_axis(handle,meas_axis)
+
+    gh = cbf_construct_goniometer(handle)
+    return gh
 end
 
 destruct_detector(det_handle) = begin
@@ -713,28 +805,54 @@ end
 Return the reciprocal lattice coordinates of the pixel with coordinates
 `slow,fast`. Wavelength is obtained from the provided file
 """
-get_recip_point(filename::AbstractString,slow,fast,args...) = begin
+get_recip_point(incif::CifContainer,slow,fast,scan_id,frame_no) = begin
 
+    filename = "$(incif.original_file)"
+    
     # Get 3D position of pixel
     
-    pixel_coord = get_pixel_coordinates(filename,slow,fast,args...)
+    pixel_coord = get_pixel_coordinates(filename,slow,fast,scan_id,frame_no)
+
+    @debug "Pixel ($slow,$fast) in $scan_id/$frame_no" pixel_coord
 
     # Set up goniometer at right position
     
-    cbf_handle = cbf_read_file(filename)
-    axis_names,types,pos = get_gonio_axis_settings(filename,args...)
-    cbf_set_axis_positions(cbf_handle,axis_names,types,pos)
-
-    @debug "Set axes to" axis_names types pos
-
-    gh = cbf_construct_goniometer(cbf_handle)
-
+    gh = prepare_gonio(filename,scan_id,frame_no)
+    
     # Get the reciprocal coordinates
 
-    wavel = cbf_get_wavelength(cbf_handle)
+    wavel = parse(Float64,incif["_diffrn_radiation_wavelength.value"][])
     recip = cbf_get_reciprocal(gh,0.5,wavel,pixel_coord)
 
     return recip
+end
+
+"""
+    get_axis_poise(filename::AbstractString,axis_id,scan_id,frame_no)
+
+Return the vector components for `axis_id` for `frame_no` of `scan_id`
+as described in the first block of CIF file `filename`
+"""
+get_axis_poise(filename,axis_id,scan_id,frame_no::Int) = begin
+
+    # Set up goniometer correctly
+
+    cbf_handle = cbf_read_file(filename)
+    axis_names,types,pos = get_gonio_axis_settings(filename,scan_id,frame_no)
+    cbf_set_axis_positions(cbf_handle,axis_names,types,pos)
+
+    # Get the actual axis positions
+
+    cbf_get_axis_poise(cbf_handle,axis_id)
+end
+
+get_detector_normal(filename,scan_id,frame_no) = begin
+
+    det_handle, det_data = prepare_detector(filename,scan_id,frame_no)    
+    n = cbf_get_detector_normal(det_handle)
+    GC.@preserve det_data destruct_detector(det_handle)
+    
+    return n
 end
 
 cbf_error(val;extra="") = begin

@@ -47,9 +47,42 @@ get_detector_axis_settings(imgcif::CifContainer) = begin
     return axis_names,axis_types,fill(0.0,length(axis_names))
 end
 
+get_gonio_axis_settings(filename::AbstractString,args...) = begin
+    get_gonio_axis_settings(first(Cif(Path(filename),native=true)).second,args...)
+end
+
 get_gonio_axis_settings(imgcif::CifContainer,scanid,frameno) = begin
     axis_names,axis_types = get_gonio_axes(imgcif)
     get_axis_settings(imgcif,scanid,frameno,axis_names,axis_types)
+end
+
+get_measurement_axis(filename,scanid) = begin
+    get_measurement_axis(first(Cif(Path(filename),native=true)).second,scanid)
+end
+
+get_measurement_axis(imgcif::CifContainer,scanid) = begin
+    c = "_diffrn_scan_axis"
+    dsa_loop = get_loop(imgcif,"$c.angle_range")
+    dsaf = filter(r -> r["$c.scan_id"]==scanid,dsa_loop)
+    filter!(dsaf) do r
+        r["$c.angle_range"]!=nothing && parse(Float64,r["$c.angle_range"])!= 0
+    end
+    if size(dsaf,1) > 1
+        throw(error("Cannot handle more than one scan axis"))
+    end
+    if size(dsaf,1) == 0
+        throw(error("No scan carried out"))
+    end
+    return dsaf[!,"$c.axis_id"][]
+end
+
+get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names) = begin
+    axis_loop = get_loop(imgcif,"_axis.id")
+    axis_types = map(axis_names) do an
+        id = indexin([an],imgcif["_axis.id"])[]
+        imgcif["_axis.type"][id]
+    end
+    get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types)
 end
 
 get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types) = begin
@@ -63,7 +96,7 @@ get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types) = b
     if !haskey(imgcif,"$cat.axis_id")
 
         # Assume axis settings are default values
-        return zip(axis_names, axis_types, fill("0",length(axis_names)))
+        return axis_names, axis_types, fill("0",length(axis_names))
     end
 
     scan_frames = get_loop(imgcif,"$cat.axis_id")
@@ -93,7 +126,8 @@ end
 """
     get_gonio_axes(imgcif::CifContainer;check=false)
 
-Return a list of goniometer axes, together with type (rotation/translation).
+Return a list of goniometer axes, together with type (rotation/translation). Axes are
+in order of dependency chain, with base axis first. Typically omega-chi-phi.
 """
 get_gonio_axes(imgcif::CifContainer) = begin
     axis_loop = get_loop(imgcif,"_axis.id")
@@ -101,7 +135,62 @@ get_gonio_axes(imgcif::CifContainer) = begin
     filt_axis = filter(row -> row["_axis.equipment"] == "goniometer",axis_loop, view=true)
     gonio_axes = String.(filt_axis[!,"_axis.id"])
 
-    return gonio_axes,String.(filt_axis[!,"_axis.type"])
+    return sort_axes(imgcif,gonio_axes),String.(filt_axis[!,"_axis.type"])
+end
+
+sort_axes(imgcif::CifContainer,axis_list) = begin
+    
+    axis_dep_order = []
+    axis_loop = get_loop(imgcif,"_axis.id")
+    axis_loop = filter(r->r["_axis.id"] in axis_list,axis_loop)
+    test_list = vcat(axis_list,nothing)
+    ax_name = nothing
+
+    while true
+        ax_dep = filter(r->r["_axis.depends_on"]==ax_name && ax_name in test_list,axis_loop)
+        if size(ax_dep,1) == 0 break end
+        if size(ax_dep,1) > 1
+            throw(error("More than one axis depends on $ax_name: $ax_dep"))
+        end
+        new_axis = ax_dep[!,"_axis.id"][]
+        if new_axis in axis_dep_order
+            throw(error("Dependency loop in axis.depends_on!"))
+        end
+        push!(axis_dep_order,new_axis)
+        ax_name = new_axis
+    end
+
+    if length(setdiff(axis_dep_order,axis_list))!= 0
+        @warn "Not all provided axes are in the dependency chain" axis_dep_order axis_list
+    end
+
+    # @debug "Axes in dependency order" axis_dep_order
+    
+    return axis_dep_order
+end
+
+"""
+    get_dependency_chain(imgcif::CifContainer,axis_id)
+
+Return the list of dependent axes for `axis_id`, with `axis_id` the first
+entry in the returned list.
+"""
+get_dependency_chain(imgcif::CifContainer,axis_id) = begin
+    axis_loop = get_loop(imgcif,"_axis.id")
+    dep_chain = [axis_id]
+    current_axis = axis_id
+    while true
+        new_ax = filter(r->r["_axis.id"]==current_axis,axis_loop)
+        @assert size(new_ax,1) == 1
+        dep_axis = new_ax[!,"_axis.depends_on"][]
+        if dep_axis == nothing break end
+        if dep_axis in dep_chain
+            @error "Dependency loop for axes" dep_axis dep_chain ex=ErrorException
+        end
+        push!(dep_chain,dep_axis)
+        current_axis = dep_axis
+    end
+    return dep_chain
 end
 
 """
@@ -128,15 +217,185 @@ end
 Return the direction of `axis_id`
 """
 get_axis_vector(incif::CifContainer,axis_id) = begin
-    axis_loop = get_loop(incif,"_axis.id")
-    filt_ax = filter(row->row["_axis.id"]==axis_id,axis_loop)
-    if size(filt_ax,1) != 1
-        throw(error("Axis name $axis_id is not defined in $(incif.original_file)"))
-    end
+    axis_ind = indexin([axis_id],incif["_axis.id"])[]
     s = "_axis.vector"
     map([1,2,3]) do i
-        parse(Float64,filt_ax[!,"$s[$i]"][])
+        parse(Float64,incif["$s[$i]"][axis_ind])
     end
+end
+
+"""
+    get_axis_vector(incif::CifContainer,axis_id,scan_id,frame_no)
+
+Return the direction of `axis_id` for `frame_no` of `scan_id`. The
+axis vector of the nth axis up the stack is the result of applying
+all underlying rotations to its starting vector.
+"""
+get_axis_vector(incif::CifContainer,axis_id,scan_id,frame_no) = begin
+
+    start_vector = get_axis_vector(incif, axis_id)  #starting vector
+        dep_chain = get_dependency_chain(incif, axis_id)
+
+    if length(dep_chain) == 1 return start_vector end
+    
+    ax_poise = get_axis_vector.(Ref(incif), dep_chain[2:end], scan_id, frame_no)
+    ax_pos = get_axis_settings(incif,scan_id,frame_no,dep_chain[2:end])[end]
+
+    # Apply rotations in order
+
+    current = start_vector
+    for (one_ax, one_pos) in zip(reverse(ax_poise),reverse(ax_pos))
+        @debug "Now rotating $current by $one_pos"
+        current = AngleAxis(one_pos*pi/180,one_ax...)*current
+    end
+
+    return current
+end
+
+"""
+    get_axis_vector(incif::CifContainer,axis_id,axis_vals)
+
+Return the direction of `axis_id` when the axes take values
+given by `axis_vals`, which is a dictionary of name=>setting.
+The axis vector of the nth axis up the stack is the result of applying
+all underlying rotations to its starting vector.
+"""
+get_axis_vector(incif::CifContainer,axis_id,axis_vals) = begin
+
+    start_vector = get_axis_vector(incif, axis_id)  #starting vector
+    dep_chain = get_dependency_chain(incif, axis_id)
+
+    if length(dep_chain) == 1 return start_vector end
+    
+    ax_poise = get_axis_vector.(Ref(incif), dep_chain[2:end], Ref(axis_vals))
+
+    # Apply rotations in order
+
+    current = start_vector
+    for (axname,axpz) in zip(reverse(dep_chain[2:end]),reverse(ax_poise))
+        axpos = axis_vals[axname]
+        @debug "Now rotating along $axpz ($axname) by $axpos"
+        current = AngleAxis(axpos*pi/180,axpz...)*current
+    end
+
+    return current
+end
+
+"""
+    unrotate(incif::CifContainer,pt,scan_id,frame_no)
+
+Calculate the position of reciprocal lattice pt observed in
+`scan_id` at `frame_no` when all axes are at their reference positions.
+"""
+unrotate(incif::CifContainer,pt,scan_id,frame_no) = begin
+    ga = reverse(get_gonio_axes(incif)[1])
+    gv = get_axis_vector.(Ref(incif),ga,scan_id,frame_no)
+    gs = get_axis_settings(incif,scan_id,frame_no,ga)[end]
+
+    @debug "Axis vectors and settings:" gv gs
+    
+    # And unrotate
+    
+    current = pt
+
+    @debug "Point now" current
+    for (ax,pos) in zip(gv,gs)
+        rot_mat = AngleAxis(-pos*pi/180,ax...)
+        current = rot_mat*current
+        @debug "Point now" current rot_mat
+    end
+    return current
+end
+
+"""
+    rotate_gonio(incif::CifContainer,pt,scan_id,frame_no)
+
+Rotate reciprocal space `pt` according to the goniometer
+settings for `scan_id` at `frame_no`.
+"""
+rotate_gonio(incif::CifContainer,pt,scan_id,frame_no) = begin
+    ga = get_gonio_axes(incif)[1]  #base is first
+    gs = get_axis_settings(incif,scan_id,frame_no,ga)[end]
+    gv = get_axis_vector.(Ref(incif),ga)  #starting values
+
+    # Move through the axes
+
+    current_pt = pt
+    for i in 1:length(ga)
+        pos = gs[i]
+        rot_mat = AngleAxis(pos*pi/180,gv[i]...)
+
+        # Move the dependent axes
+        
+        if i<length(ga)
+            gv[i+1:end] = map(x->rot_mat*x, gv[i+1:end])
+        end
+
+        current_pt = rot_mat*current_pt
+    end
+
+    @debug "Final axis vectors" gv
+
+    return current_pt
+end
+
+"""
+    rotate_gonio(incif::CifContainer,pt,scan_id)
+
+Rotate reciprocal space `pt` according to the goniometer
+settings for `scan_id`, setting the scan axis to zero.
+Useful for comparison with cbflib.
+"""
+rotate_gonio(incif::CifContainer,pt,scan_id) = begin
+    
+    ma = get_measurement_axis(incif,scan_id)
+    ga = get_gonio_axes(incif)[1]  #base is first
+    gs = get_axis_settings(incif,scan_id,1,ga)[end]
+    gv = get_axis_vector.(Ref(incif),ga)  #starting values
+
+
+    # Move through the axes
+
+    current_pt = pt
+    for i in 1:length(ga)
+
+        # Do not touch the measurement axis
+        
+        if ga[i] == ma continue end
+
+        pos = gs[i]
+        rot_mat = AngleAxis(pos*pi/180,gv[i]...)
+
+        # Move the dependent axes
+        
+        if i<length(ga)
+            gv[i+1:end] = map(x->rot_mat*x,gv[i+1:end])
+        end
+
+        current_pt = rot_mat*current_pt
+    end
+
+    return current_pt
+end
+
+get_recip_point_new(incif::CifContainer,slow,fast,scan_id,frame_no) = begin
+
+    filename = "$(incif.original_file)"
+
+    pixel_coord =  get_pixel_coordinates(filename,slow,fast,scan_id,frame_no)
+
+    # Transform to reciprocal space
+
+    length = norm(pixel_coord)
+    lambda = parse(Float64,incif["_diffrn_radiation_wavelength.value"][])
+    pixel_coord = pixel_coord / (length*lambda) + [0,0,1/lambda]
+
+    # Unrotate
+
+    @debug "Recip point before unrotating" pixel_coord
+    
+    unrotate(incif,pixel_coord,scan_id,frame_no)
+
 end
 
 """
@@ -171,7 +430,7 @@ end
 
 Return the scan_id, frame_id for the given `binary_id` according to contents
 of `cif_block`. If `cif_block` contains no scan or frame information, 
-(nothing,1) is returned.
+(nothing,1) is returned. The reverse operation is `bin_id_from_scan_frame`
 """
 scan_frame_from_bin_id(bin_id,cif_block) = begin
 
@@ -196,6 +455,50 @@ scan_frame_from_bin_id(bin_id,cif_block) = begin
     return scan_id,parse(Int64,frame_no)
 end
 
+"""
+    bin_id_from_scan_frame(cc::CifContainer,scan_id,frame_no)
+
+Return the binary identifier for the given `frame_no` of scan `scan_id`.
+`scan_id` is ignored if only one scan is present. Return is an array of
+`bin_id`.
+"""
+bin_id_from_scan_frame(cc,scan_id,frame_no) = begin
+
+    # First turn a frame_no into a frame_id
+
+    c = "_diffrn_scan_frame"
+    dsf_loop = get_loop(cc,"$c.frame_number")
+    if haskey(cc,"_diffrn_scan.id") && length(cc["_diffrn_scan.id"])>1
+        dsff = filter(r->r["$c.scan_id"] == scan_id,dsf_loop)
+    else
+        dsff = dsf_loop
+    end
+
+    dsfn = filter(r->r["$c.frame_number"] == "$frame_no",dsff)
+
+    if size(dsfn,1) > 1
+        throw(error("More than one frame with same number: $dsfn"))
+    end
+
+    if size(dsfn,1) == 0
+        return []
+    end
+
+    frame_id = dsfn[!,"$c.frame_id"][]
+
+    # Then turn a scan_id / frame_id into a bin_id
+    
+    c = "_diffrn_data_frame"
+    all_frames = get_loop(cc,"$c.binary_id")
+    aff = filter(all_frames) do r
+        r["$c.id"] == frame_id
+    end
+
+    # Then the binary ids are the answer!
+
+    return aff[:,"$c.binary_id"]
+
+end
 """
     external_specs_from_bin_ids(binary_ids::Vector,incif)
 
@@ -298,3 +601,241 @@ get_id_sequence(incif,binary_id,total) = begin
     return bin_ids
 end
 
+"""
+    get_scan_axis(cc,scan_id)
+
+Return the rotation axis that moves during scan `scan_id` together with the
+start, finish and increment values.
+"""
+get_scan_axis(cc,scan_id) = begin
+    c = "_diffrn_scan_axis"
+    dsl = get_loop(cc,"$c.scan_id")
+    dslf = filter(row->row["$c.scan_id"] == scan_id,dsl)
+    filter!(dslf) do r
+        s = r["$c.angle_range"]
+        !isnothing(s) && parse(Float64,s) != 0
+    end
+    if size(dslf,1) > 1
+        throw(error("Unable to process joint axis movements during scan $scan_id"))
+    elseif size(dslf,1) == 0
+        throw(error("No axis rotated during scan $scan_id"))
+    end
+    start = parse(Float64,dslf[!,"$c.angle_start"][])
+    finish = start + parse(Float64,dslf[!,"$c.angle_range"][])
+    increment = parse(Float64,dslf[!,"$c.angle_increment"][])
+    return dslf[!,"$c.axis_id"][],start,finish,increment
+end
+
+"""
+    find_peaks(im)
+
+A primitive peak-finding algorithm. No attempt is made to find all
+peaks. All pixels with values less than 1/2000 of the maximum are
+set to zero, then a Niblack binarisation algorithm is applied to
+produce a peak mask, which is reapplied to the original image
+and local maxima found.
+"""
+find_peaks(im) = begin
+
+    # Find the maximum peak (not spurion) intensity
+    
+    maxint = maximum(im)
+    c = argmax(im)
+    avg = ceil(mean(im)) #proxy for background
+    @debug "Assume background is" avg
+    i = 0
+    while true
+        bound_x_lower = max(c[1]-5,1)
+        bound_x_upper = min(c[1]+5,size(im,1))
+        bound_y_lower = max(c[2]-5,1)
+        bound_y_upper = min(c[2]+5,size(im,2))
+        view_area = im[bound_x_lower:bound_x_upper,bound_y_lower:bound_y_upper]
+        @debug "Maximum for $c" maximum(view_area)
+        view_area[argmax(view_area)] = 0
+        if maximum(view_area) > avg
+            @debug "Max nearby" maximum(view_area)
+            break
+        end
+        im[c] = 0
+        maxint = maximum(im)
+        c = argmax(im)
+        i+=1
+        if i>100 break end   #sanity check
+    end
+
+    threshold = maxint/20
+    if threshold < 10  #weak image or no spots?
+        threshold = max(maxint / 2, 10)
+    end
+    t_im = map(x-> x > threshold ? x : eltype(im)(0), im)
+
+    @debug "Maximum, threshold" maxint, threshold
+    # binarize
+
+    binarize!(t_im,Niblack())
+
+    # mask original
+
+    m_im = .*(t_im,im)
+
+    # find local maxima and remove spurious ones
+
+    candidates = findlocalmaxima(m_im)
+
+    maxvals = getindex.(Ref(im),candidates)
+    thresh = maximum(maxvals)/20
+
+    @debug "Peak reject threshold" thresh
+    
+    filter!(candidates) do c
+        bound_x_lower = max(c[1]-10,1)
+        bound_x_upper = min(c[1]+10,size(m_im,1))
+        bound_y_lower = max(c[2]-10,1)
+        bound_y_upper = min(c[2]+10,size(m_im,2))
+        view_area = m_im[bound_x_lower:bound_x_upper,bound_y_lower:bound_y_upper]
+        @debug "Maximum for $c" maximum(view_area)
+
+        # detect and remove single-pixel peaks
+
+        view_area[findlocalmaxima(view_area)[1]] = 0
+        
+        maximum(view_area) > thresh
+    end
+end
+
+"""
+    peak_to_frames(pixel_coords,scan_id,frame_no,cc::CifContainer;single=false)
+
+Given (slow,fast) pixel coordinates on the detector for `frame_no` of
+`scan_id`, return an array of scan id,
+frame number and (slow,fast) coordinate that the pixel should appear, if
+at all. Return is [(scan_id, frame number, slow, fast),...]. If only
+`scan_id` should be checked, `single` should be true.
+"""
+peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
+
+    # Get useful constants
+    
+    lambda = parse(Float64,cc["_diffrn_radiation_wavelength.value"][])
+    c = "_array_structure_list"
+    asl = get_loop(cc,"$c.axis_set_id")
+    fast_num = filter(row->row["$c.precedence"]=="1",asl)
+    fast_num = parse(Int64,fast_num[!,"$c.dimension"][])
+    slow_num = filter(row->row["$c.precedence"]=="2",asl)
+    slow_num = parse(Int64,slow_num[!,"$c.dimension"][])
+
+    @debug "Peak to frames" lambda slow_num fast_num
+    
+    # Get zero-rotation reciprocal coordinates
+    
+    filename = "$(cc.original_file)"
+    slow,fast = pixel_coords
+    recip_coords = get_recip_point_new(cc,slow,fast,scan_id,frame_no)
+
+    # Loop over scans looking for intersections
+
+    found_list = []
+    all_scans = single ? [scan_id] : cc["_diffrn_scan.id"]
+    for one_scan in all_scans
+
+        # Get number of frames for later
+
+        scan_ind = indexin([one_scan],cc["_diffrn_scan.id"])[]
+        no_frames = parse(Int64,cc["_diffrn_scan.frames"][scan_ind])
+        
+        # Get reciprocal coordinates at start of scan
+        
+        begin_pt = get_scan_start(cc,recip_coords,one_scan)
+
+        @debug "At zero scan axis:" rotate_gonio(cc,recip_coords,one_scan)
+
+        @debug "Reference, start of scan" recip_coords begin_pt
+
+        # Calculate rotation to intersection
+        
+        scan_axis,scan_begin,finish, incr = get_scan_axis(cc,one_scan)
+        rot_vec = get_axis_vector(cc,scan_axis,one_scan,frame_no)
+        hits = ewald_intersect(lambda,rot_vec,begin_pt)
+        rot_ang = rot_angle.(Ref(begin_pt),hits,Ref(rot_vec))
+
+        # Check if we need to rotate in the opposite direction
+        
+        fn = map(rot_ang) do x
+            if sign(x)==sign(incr) || isapprox(x,0,atol=0.01)
+                1 + x/incr
+            else
+                1 + sign(incr)*(360 - abs(x))/incr
+            end
+        end
+
+        @debug "Intersections for $pixel_coords in $one_scan" rot_ang fn
+
+        # Determine which ones we will see
+        
+        for (h,n,r) in zip(hits,fn,rot_ang)
+            if n <= no_frames
+                x,y = get_detector_coords(cc,one_scan,n,h)
+
+                @debug "Det coords" x y
+                if x > 0 && y > 0 && x <= slow_num && y <= fast_num
+                    @debug "Found!"
+                    push!(found_list,[one_scan,n,x,y])
+                end
+            else
+                @debug "Rejecting, frame no $n > $no_frames"
+            end
+        end
+    end
+    return found_list
+end
+
+"""
+    get_scan_start(cc,pt,scan_id)
+
+Calculate the reciprocal lattice location of `pt` at the 
+start of `scan_id`
+"""
+get_scan_start(cc,pt,scan_id) = begin
+    rotate_gonio(cc,pt,scan_id,1)
+end
+
+"""
+    get_detector_coords(cc,scan_id,frame_no,r_coord)
+
+Find the pixel coordinates on the detector positioned for `scan_id` and
+`frame_no` for reciprocal space coordinate `r_coord`.
+"""
+get_detector_coords(cc::CifContainer,scan_id,frame_no,r_coord) = begin
+
+    # If the ray is (0,0,1/lambda) + d((0,0,1/lambda)-r_coord)
+    # And the plane is described by a normal and point on the plane
+
+    lambda = parse(Float64,cc["_diffrn_radiation_wavelength.value"][])
+    det_point = get_pixel_coordinates(cc,0,0,scan_id,frame_no)
+    normal = get_detector_normal("$(cc.original_file)",scan_id,frame_no)
+    det_intersect = detector_intersect(r_coord,lambda,normal,det_point)
+    det_coords = lab_to_det(cc,det_intersect,scan_id,frame_no)
+end
+
+"""
+    lab_to_det(cc,det_point)
+
+Calculate the detector coordinates of `det_point`, which is a point on
+the detector expressed in laboratory coordinates. The coordinates are
+obtained by projecting the vector from the detector origin to the
+point onto the two detector axes.
+"""
+lab_to_det(cc,det_point,scan_id,frame_no) = begin
+
+    # Get the origin
+
+    det_origin = get_pixel_coordinates(cc,0,0,scan_id,frame_no)
+    point_vec = det_point .- det_origin
+    slow_size = get_pixel_coordinates(cc,1,0,scan_id,frame_no) .- det_origin
+    fast_size = get_pixel_coordinates(cc,0,1,scan_id,frame_no) .- det_origin
+    slow_dir = LinearAlgebra.normalize(slow_size)
+    fast_dir = LinearAlgebra.normalize(fast_size)
+    slow_coord = dot(point_vec,slow_dir)/norm(slow_size)
+    fast_coord = dot(point_vec,fast_dir)/norm(fast_size)
+    return slow_coord,fast_coord
+end

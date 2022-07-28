@@ -11,6 +11,10 @@ const b4master_rem = joinpath(@__DIR__,"testfiles/b4_master_remote.cif")
 const b4master_arch = joinpath(@__DIR__,"testfiles/b4_master_archive.cif")
 const multi_scan = joinpath(@__DIR__,"testfiles/all_scans.cif")
 
+# Test our own imgCIF routines
+
+include("imgcif_tests.jl")
+
 extract_files() = begin
     clean_up() # in case we failed last time
     # Uncompress archive
@@ -123,5 +127,5 @@ end
     @test ext_info.archive_path[3] == "m0220c_02_0212.cbf"
 end
 
-
 clean_up()
+

@@ -27,10 +27,15 @@ _axis.offset[1]
 _axis.offset[2]
 _axis.offset[3]
  gravity . gravity general 1 0 0 0 0 0
- OMEGA . goniometer rotation  1 0 0 0 0 0
+#
+# This notation for OMEGA seems correct. Checked
+# with spot (500,375) on scan2/frame90 matches spot
+# (508,408) on scan2/frame171 as predicted
+#
+ OMEGA . goniometer rotation   1 0 0 0 0 0
  KAPPA OMEGA goniometer rotation  0.642788 0 -0.766044 0 0 0
  PHI KAPPA goniometer rotation  1 0 0 0 0 0
- TWOTHETA . detector rotation  1 0 0 0 0 0
+ TWOTHETA . detector rotation   1 0 0 0 0 0
  DX TWOTHETA detector translation 0 0 -1 0 0 0
  YAW DX detector rotation -1 0 0 0 0 0
  PITCH YAW detector rotation 0  1 0 0 0 0
@@ -40,8 +45,8 @@ _axis.offset[3]
  # original below
  # ELEMENT_X V detector translation 0 -1 0 -30.7201 -30.7201 0
  # fixed
-ELEMENT_X V detector translation 0 1 0 -30.7201 -30.7201 0
-ELEMENT_Y ELEMENT_X detector translation 1 0 0 0 0 0
+ELEMENT_X V detector translation 0  1 0 -30.7201 -30.7201 0
+ELEMENT_Y ELEMENT_X detector translation  1 0 0 0 0 0
 
 # This loop gives the axis settings for each scan, both
 # stationary axes and scan axes.

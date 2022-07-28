@@ -8,12 +8,9 @@ Pkg.instantiate()
 using ImgCIFHandler#main
 using ImageInTerminal, Colors,ImageContrastAdjustment
 using ImageTransformations
-using ImageBinarization
-using ImageFiltering
 using ArgParse
 using CrystalInfoFramework,FilePaths,URIs, Tar
 using Luxor
-using Statistics
 
 # Tests for imgCIF files
 const test_list = []
@@ -210,83 +207,6 @@ apply_mask!(incif,im::Array{T,2}) where T = begin
         end
     end
     return im
-end
-
-"""
-    find_peaks(im)
-
-A primitive peak-finding algorithm. No attempt is made to find all
-peaks. All pixels with values less than 1/2000 of the maximum are
-set to zero, then a Niblack binarisation algorithm is applied to
-produce a peak mask, which is reapplied to the original image
-and local maxima found.
-"""
-find_peaks(im) = begin
-
-    # Find the maximum peak (not spurion) intensity
-    
-    maxint = maximum(im)
-    c = argmax(im)
-    avg = ceil(mean(im)) #proxy for background
-    @debug "Assume background is" avg
-    i = 0
-    while true
-        bound_x_lower = max(c[1]-5,1)
-        bound_x_upper = min(c[1]+5,size(im,1))
-        bound_y_lower = max(c[2]-5,1)
-        bound_y_upper = min(c[2]+5,size(im,2))
-        view_area = im[bound_x_lower:bound_x_upper,bound_y_lower:bound_y_upper]
-        @debug "Maximum for $c" maximum(view_area)
-        view_area[argmax(view_area)] = 0
-        if maximum(view_area) > avg
-            @debug "Max nearby" maximum(view_area)
-            break
-        end
-        im[c] = 0
-        maxint = maximum(im)
-        c = argmax(im)
-        i+=1
-        if i>100 break end   #sanity check
-    end
-
-    threshold = maxint/20
-    if threshold < 10  #weak image or no spots?
-        threshold = max(maxint / 2, 10)
-    end
-    t_im = map(x-> x > threshold ? x : eltype(im)(0), im)
-
-    @debug "Maximum, threshold" maxint, threshold
-    # binarize
-
-    binarize!(t_im,Niblack())
-
-    # mask original
-
-    m_im = .*(t_im,im)
-
-    # find local maxima and remove spurious ones
-
-    candidates = findlocalmaxima(m_im)
-
-    maxvals = getindex.(Ref(im),candidates)
-    thresh = maximum(maxvals)/20
-
-    @debug "Peak reject threshold" thresh
-    
-    filter!(candidates) do c
-        bound_x_lower = max(c[1]-10,1)
-        bound_x_upper = min(c[1]+10,size(m_im,1))
-        bound_y_lower = max(c[2]-10,1)
-        bound_y_upper = min(c[2]+10,size(m_im,2))
-        view_area = m_im[bound_x_lower:bound_x_upper,bound_y_lower:bound_y_upper]
-        @debug "Maximum for $c" maximum(view_area)
-
-        # detect and remove single-pixel peaks
-
-        view_area[findlocalmaxima(view_area)[1]] = 0
-        
-        maximum(view_area) > thresh
-    end
 end
 
 """
@@ -677,7 +597,7 @@ fix_loops!(incif) = begin
 end
 
 """
-    run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1)
+    run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[])
 
 Test `incif` for conformance to imgCIF consistency requirements. Meaning of arguments:
 `images`: run checks on downloaded image
@@ -688,8 +608,11 @@ Test `incif` for conformance to imgCIF consistency requirements. Meaning of argu
 `subs`: dictionary of uri -> local file correspondences to avoid downloading
 `savepng`: output annotated check image to a file
 `accum`: accumulate this many frames to make the check image
+`skip`: skip non-image checks
+`peak_check`: generate an image for checking peak locations
+`peakvals`: list of peaks to include in check
 """
-run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false) = begin
+run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[]) = begin
     ok = true
 
     if !skip
@@ -822,6 +745,14 @@ parse_cmdline(d) = begin
         default = [1]
         arg_type = Int64
         help = "Use this entry number in the archive for checking"
+        "--peaks"
+        nargs = 0
+        help = "Generate a peak check image. Implies -f (full download). Suggest also using -s if a fully downloaded archive is locally available. See also option --peakval"
+        "--peakval"
+        nargs = 4
+        metavar = ["scan","frame","fast","slow"]
+        help = "Coordinates of a peak to include in peak check. Implies --peaks. <fast> is the fast direction on the detector, typically horizontal. If only one scan, <scan> is
+ignored (but must be provided)."
         "-s", "--sub"
         nargs = 2
         metavar = ["original","local"]
@@ -850,7 +781,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-07-20\n")
+    println("\n ImgCIF checker version 2022-07-27\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
@@ -862,6 +793,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # Fix logic
 
     if parsed_args["output-png"] parsed_args["check-images"] = true end
+    if length(parsed_args["peakvals"])>0 parsed_args["peaks"] = true end
+    if parsed_args["peaks"]
+        parsed_args["output-png"] = true
+        parsed_args["full-download"] = true
+    end
     
     result,img = run_img_checks(incif[blockname],
                                 images=parsed_args["check-images"],
@@ -872,7 +808,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 accum = parsed_args["accumulate"][],
                                 subs = subs,
                                 savepng = parsed_args["output-png"],
-                                skip = parsed_args["skip"]
+                                skip = parsed_args["skip"],
+                                peak_check = parsed_args["peaks"],
+                                peakvals = parsed_args["peakvals"]
                                 )
     println("\n====End of Checks====")
     if result exit(0) else exit(1) end

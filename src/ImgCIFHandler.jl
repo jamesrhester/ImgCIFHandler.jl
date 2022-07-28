@@ -32,6 +32,11 @@ using Downloads
 using TranscodingStreams
 using URIs
 using SimpleBufferStream
+using LinearAlgebra
+using ImageBinarization
+using ImageFiltering
+using Statistics
+using Rotations
 
 export imgload         #Load raw data
 export peek_image      #Find first image in archive
@@ -43,18 +48,20 @@ export get_pixel_coordinates
 export get_surface_axes #get the axes used to locate pixels on the detector
 export get_id_sequence #get a list of sequential binary ids from the same scan
 export get_axis_vector #get the vector for an axis_id
+export find_peaks #Find some peaks in an image
 
 include("hdf_image.jl")
 include("cbf_image.jl")
 include("adsc_image.jl")
 include("imgcif.jl")
+include("recip.jl")
 
 get_image_ids(c::CifContainer) = begin
     return c["_array_data.binary_id"]
 end
     
 """
-    imgload(c::Block,array_ids)
+    imgload(c::Block,array_ids;local_version=Dict())
 
 Return the image referenced in CIF Block `c` corresponding to the specified raw array identifiers.
 `local_version` gives local copies for URLs listed in `c`. On failure returns a string containing
@@ -298,8 +305,9 @@ imgload_os(ext_info::DataFrame;local_copy = nothing) = begin
     return final_image
 end
 
-imgload(c::CifContainer,frame::Int;scan=nothing,diffrn=nothing) = begin
-    println("Not implemented yet")
+imgload(c::CifContainer,scan_id,frame_no::Int;kwargs...) = begin
+    bin_ids = bin_id_from_scan_frame(c,scan_id,frame_no)
+    imgload(c,bin_ids;kwargs...)
 end
 
 """
@@ -320,10 +328,6 @@ end
 
 imgload(s::AbstractString) = begin
     imgload(Path(s))
-end
-
-frame_from_frame_id(c::CifContainer,frame::String,scan,diffrn) = begin
-    # The frame number is provided in _diffrn_scan_frame.frame_number
 end
 
 make_absolute_uri(c::CifContainer,u::AbstractString) = begin
