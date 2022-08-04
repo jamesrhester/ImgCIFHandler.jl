@@ -17,7 +17,7 @@ as well as `gzip` and `bunzip2`. This requirement may be removed in the future.
 ## Installation
 
 To install this package, at the Julia package prompt (reached by typing `]` at the Julia prompt) type `add ImgCIFHandler`.
-See also additional instructions in the `tools` directory for installing and updating the imgCIF checking tool.
+See also [additional instructions](tools/README.md) in the `tools` directory for installing and updating the imgCIF checking tool.
 
 # Use
 

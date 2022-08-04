@@ -8,20 +8,35 @@ This program runs a series of tests on an imgCIF file.
 
 1. [Install Julia](https://julialang.org/downloads) if you don't already have it.
 2. Copy **all** `.jl` files and `Project.toml` from here to a convenient directory.
+3. Run command `julia install_image_tests.jl` from that convenient directory.
+
+See below for a way to speed up execution by about 50%.
 
 ### Updating
 
-Overwrite all `.jl` files and `Project.toml` from step 2 above with
-the latest copies from here.  Delete the file `Manifest.toml` from the
-same directory if present as otherwise the latest version of
-`ImgCIFHandler.jl` may not be used.
+1. Overwrite all `.jl` files and `Project.toml` from step 2 above with
+the latest copies from here.  
+2. Delete the file `Manifest.toml` from the
+same directory if present
+3. Run the command `julia install_image_tests.jl`
+
+### Fast execution
+
+To create a precompiled library, which will save around 30s per run:
+
+1. Edit the file [`precompile_routines.jl`](precompile_routines.jl) to include a locally-available imgCIF file and raw data
+1. Install `PackageCompiler.jl`: at the Julia prompt, `]` and then `add PackageCompiler`
+2. Exit the package interface (`Backspace` key)
+3. At the prompt: `using PackageCompiler`
+4. At the prompt: `create_sysimage(sysimage_path = <output>, precompile_execution_file = "precompile_routines.jl")`
+5. Wait around 10 minutes!
+6. When executing `image_tests.jl`, type `julia -J<output> image_tests.jl`
+
+**You must rerun this after every update!**
 
 ### Usage
 
-For help, run `julia image_test.jl --help` after installation. 
-
-The first time `image_test.jl` is run, several minutes will be occupied with downloading and 
-installing all supporting Julia packages. Subsequent runs should be much faster.
+For help, run `julia image_tests.jl --help` after installation.
 
 Note the `--sub <original_url> <local_file>` option (which may be repeated for multiple
 urls) which links a local file with a remote URL that may be present in the imgCIF file
@@ -37,6 +52,13 @@ julia image_tests.jl tests/all_scans.cif
 
 Run checks on `tests/all_scans.cif`, testing for the presence of any remote
 archives but not downloading any images and not testing any images.
+
+```
+julia -Jprecomp_lib image_tests.jl tests/all_scans.cif
+```
+
+Run checks on `tests/all_scans.cif`, using a precompiled binary `precomp_lib`
+to speed up processing.
 
 ```
 julia image_tests.jl -i tests/all_scans.cif
