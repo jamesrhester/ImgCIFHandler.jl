@@ -48,4 +48,5 @@ jobs:
                 tar -xjvf ../b4_mini.tar.bz2
                 popd
                 julia --project=tools -e "using Pkg;Pkg.add(path=\"$PWD\")"
+                julia --project=tools tools/install_image_tests.jl
                 julia --project=tools tools/image_tests.jl test/testfiles/b4_master.cif

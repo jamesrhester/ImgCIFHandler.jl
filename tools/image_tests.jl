@@ -1,9 +1,9 @@
 #
-#  Auto-install all required items
+#  If there are issues with missing packages, please run
+#  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
 Pkg.activate(@__DIR__)
-Pkg.instantiate()
 
 using ImgCIFHandler#main
 using ImageInTerminal, Colors,ImageContrastAdjustment
@@ -21,6 +21,7 @@ const dictionary_checks = []
 include("check_macros.jl")
 include("no_image_checks.jl")
 include("image_checks.jl")
+include("peak_check.jl")
 
 #             Check the full archive
 
@@ -42,7 +43,10 @@ download_uris(incif;subs=Dict())= begin
     
     for u in urls
         if u in keys(subs)
-            result_dict[u] = URI("file://"*subs[u])
+            result_dict[u] = "$(abspath(subs[u]))"
+
+            @debug "Already have" u result_dict[u]
+            
             continue
         end
         loc = URI(make_absolute_uri(incif,u))
@@ -416,7 +420,11 @@ annotate_check_image(im, transp, rot, incif;border=30,hsize=512,scan_id=nothing,
     if transp ax_labels = reverse(ax_labels) end
     draw_axes(height_new,width_new,rot,ax_labels)
     draw_peaks(width_orig,height_orig,scale_factor,transp,rot,peaks)
+
+    # output
+    
     snapshot(fname="$(incif.original_file)"*".png")
+    finish()
 end
 
 """ 
@@ -639,7 +647,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
     println("Testing presence of archive:")
 
     if full
-        subs = download_uris(incif,subs)
+        subs = download_uris(incif,subs = subs)
     end
     
     all_archives = get_archive_member_name(incif;pick=pick,subs=subs)
@@ -681,9 +689,10 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         # Output an image
         
         new_im,transp,rot,peaks = create_check_image(incif,testimage,logscale=false)
+        scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
+        
         imgfn = nothing
         if savepng
-            scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
             annotate_check_image(new_im,transp,rot,incif,scan_id=scan_id,frame_no=frame_no,peaks=peaks)
         else
             show_check_image(new_im,transp,rot)
@@ -694,6 +703,21 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         for (desc,one_test) in test_list_with_img
             print("\nTesting image $load_id: $desc: ")
             ok = ok & verdict(one_test(incif,testimage,load_id))
+        end
+
+        # Generate the peak checking image
+
+        if peak_check
+            if length(peakvals) == 0
+
+                # Use peaks from our check image run
+                
+                peakvals = map(x->[scan_id,frame_no,x[1],x[2]],peaks)
+            else
+                peakvals = map(reverse,peakvals)  #fast,slow -> slow,fast
+            end
+
+            create_peak_image(incif,peakvals)
         end
     end
     
@@ -793,7 +817,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # Fix logic
 
     if parsed_args["output-png"] parsed_args["check-images"] = true end
-    if length(parsed_args["peakvals"])>0 parsed_args["peaks"] = true end
+    if length(parsed_args["peakval"])>0 parsed_args["peaks"] = true end
     if parsed_args["peaks"]
         parsed_args["output-png"] = true
         parsed_args["full-download"] = true
@@ -810,7 +834,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 savepng = parsed_args["output-png"],
                                 skip = parsed_args["skip"],
                                 peak_check = parsed_args["peaks"],
-                                peakvals = parsed_args["peakvals"]
+                                peakvals = parsed_args["peakval"]
                                 )
     println("\n====End of Checks====")
     if result exit(0) else exit(1) end

@@ -52,7 +52,11 @@ ewald_intersect(lambda,rot,pt) = begin
     @debug "Circle intersection $h from Ewald centre"
     
     c_int = rot_c + h*(plane_c - rot_c)
-    r_int = sqrt(rot_rad^2 - h^2*dist^2)
+    x = rot_rad^2 - h^2*dist^2
+    if x < 0   # no intersections
+        return nothing
+    end
+    r_int = sqrt(x)
 
     @debug "Intersection point is $r_int from Ewald centre" c_int
     

@@ -458,7 +458,7 @@ end
 """
     bin_id_from_scan_frame(cc::CifContainer,scan_id,frame_no)
 
-Return the binary identifier for the given `frame_no` of scan `scan_id`.
+Return the binary identifier(s) for the given `frame_no` of scan `scan_id`.
 `scan_id` is ignored if only one scan is present. Return is an array of
 `bin_id`.
 """
@@ -756,6 +756,14 @@ peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
         scan_axis,scan_begin,finish, incr = get_scan_axis(cc,one_scan)
         rot_vec = get_axis_vector(cc,scan_axis,one_scan,frame_no)
         hits = ewald_intersect(lambda,rot_vec,begin_pt)
+
+        if hits === nothing
+
+            @debug "No intersections for $one_scan"
+            continue
+
+        end
+
         rot_ang = rot_angle.(Ref(begin_pt),hits,Ref(rot_vec))
 
         # Check if we need to rotate in the opposite direction

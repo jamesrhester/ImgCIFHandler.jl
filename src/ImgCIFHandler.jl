@@ -10,8 +10,8 @@ containing the raw data, but instead provides tags pointing to the
 data storage location.
 
 This library provides methods for bringing that image data into
-Julia, including handling the variety of formats provided. The only
-function exported is `imgload`.
+Julia, including handling the variety of formats provided, and for
+general manipulation of the information found in the imgCIF.
 
 ==#
 """
@@ -49,6 +49,10 @@ export get_surface_axes #get the axes used to locate pixels on the detector
 export get_id_sequence #get a list of sequential binary ids from the same scan
 export get_axis_vector #get the vector for an axis_id
 export find_peaks #Find some peaks in an image
+export bin_id_from_scan_frame #Convert scan/frame_no into binary id
+export scan_frame_from_bin_id #Convert bin_id into scan/frame
+export peak_to_frames #Calculate all peak appearances
+export get_dependency_chain #Get the dependent axes of an axis
 
 include("hdf_image.jl")
 include("cbf_image.jl")
