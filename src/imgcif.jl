@@ -31,9 +31,9 @@ computed from _diffrn_scan_axis information if _diffrn_scan_frame_axis
 is missing. Set `scanid` to `nothing` or `missing` if no scans are
 explicitly defined in the file.
 """
-get_detector_axis_settings(imgcif::CifContainer,scanid,frameno) = begin
-    axis_names, axis_types = get_detector_axes(imgcif)
-    get_axis_settings(imgcif,scanid,frameno,axis_names,axis_types)
+get_detector_axis_settings(imgcif::CifContainer, args...) = begin
+    axis_names, _ = get_detector_axes(imgcif)
+    get_axis_settings(imgcif, axis_names, args...)
 end
 
 # Version given a filename
@@ -51,9 +51,9 @@ get_gonio_axis_settings(filename::AbstractString,args...) = begin
     get_gonio_axis_settings(first(Cif(Path(filename),native=true)).second,args...)
 end
 
-get_gonio_axis_settings(imgcif::CifContainer,scanid,frameno) = begin
-    axis_names,axis_types = get_gonio_axes(imgcif)
-    get_axis_settings(imgcif,scanid,frameno,axis_names,axis_types)
+get_gonio_axis_settings(imgcif::CifContainer, args...) = begin
+    axis_names, _ = get_gonio_axes(imgcif)
+    get_axis_settings(imgcif, axis_names, args...)
 end
 
 get_measurement_axis(filename,scanid) = begin
@@ -61,6 +61,7 @@ get_measurement_axis(filename,scanid) = begin
 end
 
 get_measurement_axis(imgcif::CifContainer,scanid) = begin
+
     c = "_diffrn_scan_axis"
     dsa_loop = get_loop(imgcif,"$c.angle_range")
     dsaf = filter(r -> r["$c.scan_id"]==scanid,dsa_loop)
@@ -76,29 +77,29 @@ get_measurement_axis(imgcif::CifContainer,scanid) = begin
     return dsaf[!,"$c.axis_id"][]
 end
 
-get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names) = begin
+get_axis_settings(imgcif::CifContainer,axis_names, args...) = begin
+
     axis_loop = get_loop(imgcif,"_axis.id")
     axis_types = map(axis_names) do an
         id = indexin([an],imgcif["_axis.id"])[]
         imgcif["_axis.type"][id]
     end
-    get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types)
-end
 
-get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types) = begin
-    if haskey(imgcif,"_diffrn_scan_frame_axis.axis_id")
-        return get_explicit_frame(imgcif,scanid,frameno)
+    if haskey(imgcif,"_diffrn_scan_frame_axis.axis_id") && length(args) > 0
+        return get_explicit_frame(imgcif, args...)
     end
 
     # Calculate settings
 
     cat = "_diffrn_scan_axis"
-    if !haskey(imgcif,"$cat.axis_id")
+    if !haskey(imgcif,"$cat.axis_id") || length(args) == 0
 
         # Assume axis settings are default values
-        return axis_names, axis_types, fill("0",length(axis_names))
+        return axis_names, axis_types, fill(0.0,length(axis_names))
     end
 
+    scanid, frameno = args
+    
     scan_frames = get_loop(imgcif,"$cat.axis_id")
     our_scan = filter(row->row["$cat.scan_id"] == scanid, scan_frames,view=true)
     positions = map(axis_names,axis_types) do one_axis,one_type
@@ -120,7 +121,7 @@ get_axis_settings(imgcif::CifContainer,scanid,frameno,axis_names,axis_types) = b
             start + (frameno-1)*increment
         end
     end
-    return axis_names,axis_types,positions
+    return axis_names, axis_types, positions
 end
 
 """
@@ -224,6 +225,14 @@ get_axis_vector(incif::CifContainer,axis_id) = begin
     end
 end
 
+get_axis_offset(incif::CifContainer,axis_id) = begin
+    axis_ind = indexin([axis_id],incif["_axis.id"])[]
+    s = "_axis.offset"
+    map([1,2,3]) do i
+        parse(Float64,incif["$s[$i]"][axis_ind])
+    end
+end
+
 """
     get_axis_vector(incif::CifContainer,axis_id,scan_id,frame_no)
 
@@ -233,23 +242,8 @@ all underlying rotations to its starting vector.
 """
 get_axis_vector(incif::CifContainer,axis_id,scan_id,frame_no) = begin
 
-    start_vector = get_axis_vector(incif, axis_id)  #starting vector
-        dep_chain = get_dependency_chain(incif, axis_id)
+    get_axis_poise(incif,axis_id,scan_id,frame_no)[1]
 
-    if length(dep_chain) == 1 return start_vector end
-    
-    ax_poise = get_axis_vector.(Ref(incif), dep_chain[2:end], scan_id, frame_no)
-    ax_pos = get_axis_settings(incif,scan_id,frame_no,dep_chain[2:end])[end]
-
-    # Apply rotations in order
-
-    current = start_vector
-    for (one_ax, one_pos) in zip(reverse(ax_poise),reverse(ax_pos))
-        @debug "Now rotating $current by $one_pos"
-        current = AngleAxis(one_pos*pi/180,one_ax...)*current
-    end
-
-    return current
 end
 
 """
@@ -282,15 +276,62 @@ get_axis_vector(incif::CifContainer,axis_id,axis_vals) = begin
 end
 
 """
+    get_axis_poise(incif::CifContainer,axis_id,scan_id,frame_no)
+
+Return the direction and offset of `axis_id` for `frame_no` of `scan_id`. The
+axis vector of the nth axis up the stack is the result of applying
+all underlying rotations to its starting vector.
+"""
+get_axis_poise(incif::CifContainer, axis_id, args...) = begin
+    
+    start_vector = get_axis_vector(incif, axis_id)  #starting vector
+    start_offset = get_axis_offset(incif, axis_id)  #starting offset
+
+    dep_chain = get_dependency_chain(incif, axis_id)
+
+    if length(dep_chain) == 1 return start_vector, start_offset end
+
+    # Get starting positions
+    
+    ax_vec = get_axis_vector.(Ref(incif), dep_chain[2:end])
+    ax_offset = get_axis_offset.(Ref(incif), dep_chain[2:end])
+    ax_nm,ax_types,ax_pos = get_axis_settings(incif,dep_chain[2:end], args...)
+
+    # Apply rotations/translations in order
+
+    current = start_vector
+    current_shift = start_offset
+
+    @debug "Shift at beginning" current_shift
+    
+    for (n, v, o, t, p) in zip(ax_nm, ax_vec, ax_offset, ax_types, ax_pos)
+        if t == "rotation"
+            @debug "Now rotating $current by $p" n
+            rotmat = AngleAxis(p*pi/180,v...)
+            current = rotmat * current
+            current_shift = rotmat * current_shift + o
+            @debug "Shift" current_shift rotmat o
+        else
+            @debug "Now translating $current_shift by $p along $v" n
+            current_shift = current_shift + o + p * v
+            @debug "After" current_shift
+        end
+        
+    end
+
+    return current, current_shift
+end
+
+"""
     unrotate(incif::CifContainer,pt,scan_id,frame_no)
 
 Calculate the position of reciprocal lattice pt observed in
 `scan_id` at `frame_no` when all axes are at their reference positions.
 """
-unrotate(incif::CifContainer,pt,scan_id,frame_no) = begin
+unrotate(incif::CifContainer, pt, args...) = begin
     ga = reverse(get_gonio_axes(incif)[1])
-    gv = get_axis_vector.(Ref(incif),ga,scan_id,frame_no)
-    gs = get_axis_settings(incif,scan_id,frame_no,ga)[end]
+    gv = get_axis_vector.(Ref(incif), ga, args...)
+    gs = get_axis_settings(incif, ga, args...)[end]
 
     @debug "Axis vectors and settings:" gv gs
     
@@ -313,10 +354,10 @@ end
 Rotate reciprocal space `pt` according to the goniometer
 settings for `scan_id` at `frame_no`.
 """
-rotate_gonio(incif::CifContainer,pt,scan_id,frame_no) = begin
-    ga = get_gonio_axes(incif)[1]  #base is first
-    gs = get_axis_settings(incif,scan_id,frame_no,ga)[end]
-    gv = get_axis_vector.(Ref(incif),ga)  #starting values
+rotate_gonio(incif::CifContainer,pt, args...) = begin
+    ga = reverse(get_gonio_axes(incif)[1])  #base is first
+    gs = get_axis_settings(incif, ga, args...)[end]
+    gv = get_axis_vector.(Ref(incif),ga)    #starting values
 
     # Move through the axes
 
@@ -324,13 +365,6 @@ rotate_gonio(incif::CifContainer,pt,scan_id,frame_no) = begin
     for i in 1:length(ga)
         pos = gs[i]
         rot_mat = AngleAxis(pos*pi/180,gv[i]...)
-
-        # Move the dependent axes
-        
-        if i<length(ga)
-            gv[i+1:end] = map(x->rot_mat*x, gv[i+1:end])
-        end
-
         current_pt = rot_mat*current_pt
     end
 
@@ -349,10 +383,9 @@ Useful for comparison with cbflib.
 rotate_gonio(incif::CifContainer,pt,scan_id) = begin
     
     ma = get_measurement_axis(incif,scan_id)
-    ga = get_gonio_axes(incif)[1]  #base is first
-    gs = get_axis_settings(incif,scan_id,1,ga)[end]
+    ga = reverse(get_gonio_axes(incif)[1])  #base is first
+    gs = get_axis_settings(incif, ga, scan_id,1)[end]
     gv = get_axis_vector.(Ref(incif),ga)  #starting values
-
 
     # Move through the axes
 
@@ -365,12 +398,6 @@ rotate_gonio(incif::CifContainer,pt,scan_id) = begin
 
         pos = gs[i]
         rot_mat = AngleAxis(pos*pi/180,gv[i]...)
-
-        # Move the dependent axes
-        
-        if i<length(ga)
-            gv[i+1:end] = map(x->rot_mat*x,gv[i+1:end])
-        end
 
         current_pt = rot_mat*current_pt
     end
@@ -396,6 +423,93 @@ get_recip_point_new(incif::CifContainer,slow,fast,scan_id,frame_no) = begin
     
     unrotate(incif,pixel_coord,scan_id,frame_no)
 
+end
+
+# Detector calculations
+
+"""
+    calculate_position(incif::CifContainer, axis_id, pos, scan_id, frame_no)
+
+Return laboratory coordinates for `pos` of `axis_id` with everything positioned
+for `frame_no` of `scan_id`. Only makes sense for translation axes. If
+`scan_id` and `frame_no` missing, will use reference positions.
+"""
+calculate_position(incif::CifContainer, axis_id, pos, args...) = begin
+
+    vector, offset = get_axis_poise(incif, axis_id, args...)
+    dist = pixel_to_length(incif, axis_id, pos)
+    @debug "Axis $axis_id pos $pos" dist offset
+    disp = offset + dist*vector
+    return disp, offset
+end
+
+"""
+    pixel_to_length(incif::CifContainer, axis_id, pix;pix_origin=false)
+
+Convert a pixel to a distance from the origin of detector coordinates.
+If `pixel_origin` is true, the distance is from the centre of the origin
+pixel, not the origin of the detector axes.
+"""
+pixel_to_length(incif::CifContainer, axis_id, pix;pix_origin=false) = begin
+
+    c = "_array_structure_list_axis"
+    
+    if !(axis_id in incif["$c.axis_id"])
+        throw(error("$axis_id is not a detector pixel axis"))
+    end
+
+    row = indexin([axis_id],incif["$c.axis_id"])[]
+    start = pix_origin ? 0.0 : parse(Float64,incif["$c.displacement"][row])
+
+    return start + parse(Float64,incif["$c.displacement_increment"][row])*pix
+end
+
+get_pixel_coordinates(incif::CifContainer,slow,fast,args...) = begin
+
+    fast_ax, slow_ax = get_surface_axes(incif)
+    fast_disp, f_orig = calculate_position(incif, fast_ax, fast, args...)
+    slow_disp, s_orig = calculate_position(incif, slow_ax, slow, args...)
+
+    if f_orig != s_orig
+        throw(error("Detector surface axes $slow_ax, $fast_ax have different origins: $s_orig, $f_orig. Suggest making one depend on the other in axis description"))
+    end
+
+    fast_disp + (slow_disp - s_orig)
+end
+
+"""
+    get_beam_centre(incif::CifContainer,scan_id,frame_no)
+
+Return the beam centre coordinates for `frame_no` of `scan_id`,
+taking into account all axis positions. Return pixel coordinates
+slow, fast, and mm coordinates slow, fast as 4 values. The mm
+coordinates are from the centre of the origin pixel, not the
+origin of the detector coordinates.
+"""
+get_beam_centre(incif::CifContainer,args...) = begin
+
+    # Follow the algorithm of cbflib
+
+    o_coords = get_pixel_coordinates(incif,0,0,args...)
+    s_step = get_pixel_coordinates(incif,1,0,args...) - o_coords
+    f_step = get_pixel_coordinates(incif,0,1,args...) - o_coords
+    
+    # Check are linearly independent
+
+    det = s_step[1]*f_step[2] - s_step[2]*f_step[1]
+    if det == 0.0
+        throw(error("Detector pixel axes are parallel"))
+    end
+
+    # Calculate distance to x=y=0 in pixel coordinates
+
+    index = [-f_step[2]*o_coords[1] + f_step[1]*o_coords[2],
+               s_step[2]*o_coords[1] - s_step[1]*o_coords[2]]/det
+
+    fast_ax, slow_ax = get_surface_axes(incif)
+
+    centre = pixel_to_length.(Ref(incif), [slow_ax, fast_ax], index, pix_origin=true)
+    return centre, index
 end
 
 """

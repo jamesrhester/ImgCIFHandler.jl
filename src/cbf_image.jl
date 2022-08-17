@@ -773,16 +773,16 @@ get_beam_centre(filename::AbstractString,args...) = begin
     centre1,centre2,slow,fast = cbf_get_beam_center(det_handle)
     GC.@preserve det_data destruct_detector(det_handle)
     
-    return centre1,centre2,slow,fast
+    return [centre1,centre2],[slow,fast]
 
 end
 
-get_beam_centre(incif::CifContainer,args...) = begin
-    get_beam_centre("$(incif.original_file)",args...)
-end
+#get_beam_centre(incif::CifContainer,args...) = begin
+#    get_beam_centre("$(incif.original_file)",args...)
+#end
 
 """
-   get_pixel_coordinates(incif::CifContainer,fast_coord,slow_coord,scan,frame)
+   get_pixel_coordinates(incif::AbstractString,fast_coord,slow_coord,scan,frame)
 
 Return the coordinates in lab space of the nominated pixel, with axes oriented
 as for `frame` in `scan`. `scan` and `frame` are optional.
@@ -794,10 +794,10 @@ get_pixel_coordinates(filename::AbstractString,slow_coord,fast_coord,args...) = 
     return [x,y,z]
 end
 
-get_pixel_coordinates(incif::CifContainer,args...) = begin
-    filename = "$(incif.original_file)"
-    get_pixel_coordinates(filename,args...)
-end
+#get_pixel_coordinates(incif::CifContainer,args...) = begin
+#    filename = "$(incif.original_file)"
+#    get_pixel_coordinates(filename,args...)
+#end
 
 """
     get_recip_point(filename::AbstractString,slow,fast,args...)
@@ -833,7 +833,7 @@ end
 Return the vector components for `axis_id` for `frame_no` of `scan_id`
 as described in the first block of CIF file `filename`
 """
-get_axis_poise(filename,axis_id,scan_id,frame_no::Int) = begin
+get_axis_poise(filename::AbstractString,axis_id,scan_id,frame_no::Int) = begin
 
     # Set up goniometer correctly
 

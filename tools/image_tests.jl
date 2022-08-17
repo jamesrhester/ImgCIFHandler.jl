@@ -381,17 +381,16 @@ annotate_check_image(im, transp, rot, incif;border=30,hsize=512,scan_id=nothing,
     # Get the beam centre
 
     if isnothing(scan_id)
-        _,_,slow_c,fast_c = get_beam_centre(incif)
+        _,cent_pix = get_beam_centre(incif)
     else
-        _,_,slow_c,fast_c = get_beam_centre(incif,scan_id,frame_no)
+        _,cent_pix = get_beam_centre(incif,scan_id,frame_no)
     end
 
     # Transform beam centre coordinates; scale and rotation
 
-    new_slow_c,new_fast_c = calc_new_coords((slow_c,fast_c),transp,rot,scale_factor,width_orig,height_orig)
-    
-    slow_c = scale_factor*slow_c
-    fast_c = scale_factor*fast_c
+    new_slow_c,new_fast_c = calc_new_coords(cent_pix,transp,rot,scale_factor,width_orig,height_orig)
+
+    cent_pix = cent_pix * scale_factor
 
     @debug "Old, new height, width" height_orig width_orig height_new width_new
 
@@ -412,7 +411,7 @@ annotate_check_image(im, transp, rot, incif;border=30,hsize=512,scan_id=nothing,
     
     setcolor("red")
     box(Point(new_slow_c+border,new_fast_c+border),4,4,:fill)
-    box(Point(border*3+width_new+slow_c,border+fast_c),4,4,:fill)
+    box(Point(border*3+width_new+cent_pix[1],border+cent_pix[2]),4,4,:fill)
 
     # draw the axis labels
     
