@@ -101,7 +101,15 @@ get_axis_settings(imgcif::CifContainer,axis_names, args...) = begin
     scanid, frameno = args
     
     scan_frames = get_loop(imgcif,"$cat.axis_id")
-    our_scan = filter(row->row["$cat.scan_id"] == scanid, scan_frames,view=true)
+
+    # If we have a choice of scans filter the one we want
+    
+    if haskey(imgcif,"_diffrn_scan.id") && length(imgcif["_diffrn_scan.id"]) > 1 
+        our_scan = filter(row->row["$cat.scan_id"] == scanid, scan_frames,view=true)
+    else
+        our_scan = scan_frames
+    end
+    
     positions = map(axis_names,axis_types) do one_axis,one_type
         our_axis = filter(row->row["$cat.axis_id"] == one_axis,our_scan,view=true)
         if size(our_axis)[1] == 0

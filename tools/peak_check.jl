@@ -55,7 +55,7 @@ create_peak_area(incif,scan_id,frame_no,slow,fast;skip=3,range=2,window=10,local
     max_frame = parse(Int64,max_frame)
     frame_no = Int(round(frame_no))
     frame_nos = collect(max(1,frame_no-range*skip):skip:min(max_frame,frame_no+range*skip))
-    frame_ids = bin_id_from_scan_frame.(Ref(cc),scan_id,frame_nos)
+    frame_ids = bin_id_from_scan_frame.(Ref(incif),scan_id,frame_nos)
     filter!(x->length(x) == 1, frame_ids)  #can't handle multi-image frames for now
 
     if length(frame_ids) == 0
