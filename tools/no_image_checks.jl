@@ -310,7 +310,7 @@ end
 @noimgcheck "Check calculated beam centre" check_beam_centre(incif) = begin
     messages = []
 
-    centre1,centre2,index1,index2 = get_beam_centre(incif)
+    (centre1, centre2), (index1, index2) = get_beam_centre(incif)
     if index1 < 0 || index2 < 0
         push!(messages,(false,"Beam centre in pixels $index1, $index2 for zero axis settings has at least one negative value, which implies a position off the detector"))
     end
