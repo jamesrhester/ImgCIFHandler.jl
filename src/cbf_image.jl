@@ -777,10 +777,6 @@ get_beam_centre(filename::AbstractString,args...) = begin
 
 end
 
-#get_beam_centre(incif::CifContainer,args...) = begin
-#    get_beam_centre("$(incif.original_file)",args...)
-#end
-
 """
    get_pixel_coordinates(incif::AbstractString,fast_coord,slow_coord,scan,frame)
 
@@ -794,21 +790,14 @@ get_pixel_coordinates(filename::AbstractString,slow_coord,fast_coord,args...) = 
     return [x,y,z]
 end
 
-#get_pixel_coordinates(incif::CifContainer,args...) = begin
-#    filename = "$(incif.original_file)"
-#    get_pixel_coordinates(filename,args...)
-#end
-
 """
     get_recip_point(filename::AbstractString,slow,fast,args...)
 
 Return the reciprocal lattice coordinates of the pixel with coordinates
 `slow,fast`. Wavelength is obtained from the provided file
 """
-get_recip_point(incif::CifContainer,slow,fast,scan_id,frame_no) = begin
+get_recip_point(filename::AbstractString,slow,fast,scan_id,frame_no) = begin
 
-    filename = "$(incif.original_file)"
-    
     # Get 3D position of pixel
     
     pixel_coord = get_pixel_coordinates(filename,slow,fast,scan_id,frame_no)

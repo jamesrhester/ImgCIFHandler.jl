@@ -413,11 +413,9 @@ rotate_gonio(incif::CifContainer,pt,scan_id) = begin
     return current_pt
 end
 
-get_recip_point_new(incif::CifContainer,slow,fast,scan_id,frame_no) = begin
+get_recip_point(incif::CifContainer,slow,fast,scan_id,frame_no) = begin
 
-    filename = "$(incif.original_file)"
-
-    pixel_coord =  get_pixel_coordinates(filename,slow,fast,scan_id,frame_no)
+    pixel_coord =  get_pixel_coordinates(incif,slow,fast,scan_id,frame_no)
 
     # Transform to reciprocal space
 
@@ -852,7 +850,7 @@ peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
     
     filename = "$(cc.original_file)"
     slow,fast = pixel_coords
-    recip_coords = get_recip_point_new(cc,slow,fast,scan_id,frame_no)
+    recip_coords = get_recip_point(cc,slow,fast,scan_id,frame_no)
 
     # Loop over scans looking for intersections
 
