@@ -916,6 +916,9 @@ peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
             end
         end
     end
+
+    @debug "Found: $found_list" pixel_coords scan_id frame_no
+    
     return found_list
 end
 

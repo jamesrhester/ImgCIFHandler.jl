@@ -711,12 +711,12 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
                 # Use peaks from our check image run
                 
-                peakvals = map(x->[scan_id,frame_no,x[1],x[2]],peaks)
+                peakvals = map(x->[scan_id,frame_no,x[2],x[1]],peaks)
             else
                 peakvals = map(reverse,peakvals)  #fast,slow -> slow,fast
             end
 
-            create_peak_image(incif,peakvals)
+            create_peak_image(incif,peakvals,local_version=subs)
         end
     end
     

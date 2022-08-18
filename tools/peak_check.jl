@@ -22,6 +22,8 @@ create_peak_image(incif,peaklist;skip=3,range=2,kwargs...) = begin
         peak_to_frames((slow,fast),scan_id,frame_no,incif)
     end
 
+    @debug "Predicted peaks:" peaklist predicted
+    
     # Create the image excerpts
 
     all_images = []
