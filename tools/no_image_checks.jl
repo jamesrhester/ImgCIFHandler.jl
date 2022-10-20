@@ -30,9 +30,10 @@
     for ic in info_check
         if !haskey(incif,ic)
             push!(messages,(false,"Required item $ic is missing"))
-        end
-        if any(x->ismissing.(x),incif[ic])
-            push!(messages,(false,"At least one value for required item $ic is missing"))
+        else
+            if any(x->ismissing.(x),incif[ic])
+                push!(messages,(false,"At least one value for required item $ic is missing"))
+            end
         end
     end
     return messages
