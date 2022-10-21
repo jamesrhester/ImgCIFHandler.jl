@@ -23,17 +23,29 @@ include("no_image_checks.jl")
 include("image_checks.jl")
 include("peak_check.jl")
 
-#             Check the full archive
+"""
+Information about cached files. If value is a
+directory, it is assumed to be the root directory
+when archive at URI is unpacked, otherwise it is
+the path to the local equivalent of the archive.
+"""
+const CachedLocation = Dict{URI, String}
+
+is_archive(u) = begin
+    long_ext = u[end-6:end]
+    short_ext = u[end-2:end]
+    long_ext in [".tar.gz", "tar.bz2"] || short_ext in ["tgz","zip"]
+end
 
 """
     download_uris(incif;subs=Dict)
 
     Download uris from `incif` to local files, where `subs` contains
-    local file equivalents to urls {url -> local file}
+    local file equivalents to urls {url => local file}
 """
-download_uris(incif;subs=Dict())= begin
+download_uris(incif; subs=Dict())= begin
 
-    result_dict = Dict{String,String}()
+    downloaded = CachedLocation()
 
     # Get all referenced URIs
     
@@ -43,27 +55,27 @@ download_uris(incif;subs=Dict())= begin
     
     for u in urls
         if u in keys(subs)
-            result_dict[u] = "$(abspath(subs[u]))"
+            downloaded[u] = "$(abspath(subs[u]))"
 
-            @debug "Already have" u result_dict[u]
+            @debug "Already have" downloaded[u]
             
             continue
         end
         loc = URI(make_absolute_uri(incif,u))
-        result_dict[u] = Downloads.download(loc)
+        downloaded[u] = Downloads.download(loc)
     end
 
-    return result_dict
+    return downloaded
 end
 
 """
     get_archive_member_name(incif;pick=1,subs=Dict())
 
     For each distinct URI in `incif`, return the name of a member file that is listed
-    in `incif`. `subs` is a dictionary of local file equivalents to urls. `pick`
+    in `incif`. `subs` is a dict of local file equivalents to urls. `pick`
     selects the nth member of the archive instead of the first.
 """
-get_archive_member_name(incif;pick=1,subs=Dict()) = begin
+get_archive_member_name(incif;pick=1, subs=CachedLocation()) = begin
 
     @debug "Looking for member in" subs
     
@@ -71,17 +83,20 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
     
     urls = unique(incif["_array_data_external_data.uri"])
 
-    result_dict = Dict{String,String}()
+    result_dict = Dict{Tuple{String,String},String}()
 
     # Cycle through URIs, looking either for everything or one thing
     
     for u in urls
 
+        is_unpacked = false
+        
         # Construct actual URI
         
         if haskey(subs,u)
             loc = URI("file://"*subs[u])
             @debug "Using $loc for $u" subs
+            is_unpacked = isdir(subs[u])
         else
             if !isempty(subs)
                 @warn "Warning: no substitute for $u"
@@ -89,30 +104,53 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
             loc = URI(make_absolute_uri(incif,u))
         end
 
-        # Find archive type
-        
-        pos = indexin([u],incif["_array_data_external_data.uri"])[]
-        arch_type = nothing
-        if haskey(incif,"_array_data_external_data.archive_format")
-            arch_type = incif["_array_data_external_data.archive_format"][pos]
-        end
-
-        # Extract a single file if we have an archive
-        
-        x = ""
-        if arch_type in ("TBZ","TGZ","TAR")
-            try
-                x = peek_image(loc,arch_type,incif,check_name=false,entry_no=pick)
-            catch exn
-                @debug "Peeking into $u gave error:" exn
+        if !is_unpacked
+            
+            # Find archive type
+            
+            pos = indexin([u],incif["_array_data_external_data.uri"])[]
+            arch_type = nothing
+            if haskey(incif,"_array_data_external_data.archive_format")
+                arch_type = incif["_array_data_external_data.archive_format"][pos]
             end
-            @debug "Got $x for $u"
-            result_dict[u] = x == nothing ? "" : x
-        elseif arch_type === nothing  #No unpacking possible eg HDF5/single frame
-            #TODO: actually check the file exists using http request
-            result_dict[u] = "$loc"
-        else
-            @warn "Partial downloading not available for $u: try full downloading with option -f"
+
+            # Extract a single file if we have an archive
+            
+            x = ""
+            if arch_type in ("TBZ","TGZ","TAR")
+                try
+                    x = peek_image(loc,arch_type,incif,check_name=false,entry_no=pick)
+                catch exn
+                    @debug "Peeking into $u gave error:" exn
+                    continue
+                end
+                @debug "Got $x for $u"
+                result_dict[(u,x)] = "" 
+            elseif arch_type === nothing  #No unpacking possible eg HDF5/single frame
+                #TODO: actually check the file exists using http request
+                result_dict[(u,"")] = "$loc"
+            else
+                @warn "Partial downloading not available for $u: try full downloading with option -f"
+            end
+
+        else   #all unpacked already
+
+            for (root, dirs, files) in walkdir(subs[u])
+                if length(files) > 0
+                    root_rel = relpath(root, subs[u])
+
+                    @debug "Root path is" root_rel
+                    for f in files
+                        found = joinpath(root_rel, f)
+                        if found in incif["_array_data_external_data.archive_path"]
+                            result_dict[(u, found)] = joinpath(subs[u],found)
+                        end
+                    end
+                end
+            end
+            if length(result_dict) == 0
+                throw(error("Local directory $(subs[u]) contains no files"))
+            end
         end
     end
 
@@ -124,13 +162,15 @@ get_archive_member_name(incif;pick=1,subs=Dict()) = begin
 end
 
 test_archive_present(local_archives) = begin
+    
     messages = []
-    for (k,v) in local_archives
-        if v == ""
-            push!(messages, (false, "Unable to access $k"))
+    for ((k1, k2), v) in local_archives
+        if v == "" && isnothing(k2)
+            push!(messages, (false, "Unable to access $(k[1])"))
         end
     end
     return messages
+    
 end
 
 @fullcheck "All members present" member_check(incif,all_archives) = begin
@@ -142,33 +182,37 @@ end
 
 """
     Find an image ID that is obtainable. `archive_list` is
-    a dictionary of URI -> item pairs where `item` is an archive member
-    or the URI itself if the URI is a complete frame.
+    a dictionary of (URI, path) -> item pairs where `item` is an archive member
+
 """
-find_load_id(incif,archive_list) = begin
+find_load_id(incif, archive_list) = begin
 
     external_info = get_loop(incif,"_array_data_external_data.id")
-    known_uris = unique(incif["_array_data_external_data.uri"])
+    known_uris = incif["_array_data_external_data.uri"]
     if haskey(incif,"_array_data_external_data.archive_path")
         known_paths = incif["_array_data_external_data.archive_path"]
     else
-        known_paths = known_uris
+        known_paths = []
     end
-    
-    # First see if our frame is in the file
 
-    @debug archive_list
-    for (k,v) in archive_list
-        if v in known_paths
-            pos = indexin([v],known_paths)[]
-            # a level of indirection
-            ext_data_id = incif["_array_data_external_data.id"][pos]
-            vv = incif["_array_data.external_data_id"]
-            pos = indexin([ext_data_id],vv)[]
-            return incif["_array_data.binary_id"][pos]
+    archive_uris = [k[1] for k in keys(archive_list)]
+
+    # Find a matching frame
+
+    for pos in 1:length(known_uris)
+        if known_uris[pos] in archive_uris
+            official_path = length(known_paths) > 0 ? known_paths[pos] : ""
+            if haskey(archive_list, (known_uris[pos], official_path))
+                # a level of indirection
+                ext_data_id = incif["_array_data_external_data.id"][pos]
+                vv = incif["_array_data.external_data_id"]
+                pos = indexin([ext_data_id],vv)[]
+                return incif["_array_data.binary_id"][pos]
+            end
         end
     end
-    
+
+    @error "No recognised frame files found" archive_list
 end
 
 verdict(msg_list) = begin
@@ -673,7 +717,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         end
         
         try
-            testimage = imgload(incif,load_ids;local_version=subs)
+            testimage = imgload(incif,load_ids;local_version=subs, cached = all_archives)
         catch e
             @debug e
             verdict([(false,"Unable to access image $load_id: $e")])
@@ -780,7 +824,7 @@ ignored (but must be provided)."
         nargs = 2
         metavar = ["original","local"]
         action = "append_arg"
-        help = "Use <local> file in place of URI <original> (for testing). Use -f to access whole file. All URIs in <filename> must be provided, option may be used multiple times"
+        help = "Use <local> file in place of archive URI <original> (for testing). Use -f to access whole file. All URIs in <filename> must be provided, option may be used multiple times. If <local> is a directory, its contents are assumed to be the unpacked archive."
         "--skip"
         nargs = 0
         help = "Only check actual images"
