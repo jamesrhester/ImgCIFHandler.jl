@@ -38,11 +38,18 @@ To create a precompiled library, which will save around 30s per run:
 
 For help, run `julia image_tests.jl --help` after installation.
 
-Note the `--sub <original_url> <local_file>` option (which may be repeated for multiple
+Note the `--sub <original_url> <local>` option (which may be repeated for multiple
 urls) which links a local file with a remote URL that may be present in the imgCIF file
 being checked. This
 allows interactive preparation and checking of imgCIF descriptions and archive files without 
-needing to download the whole archive each time the program is run.
+needing to download the whole archive each time the program is run. 
+
+If `<local>` is a directory, it is treated as if it is the root of an already extracted
+archive and individual archived files are searched for within it. For example, if an
+archive has files `crystal_1/abcd_01_0001.cbf, crystal_1/abcd_01_0002.cbf,...` and
+it is extracted into directory `/home/me/downloads`, creating a directory 
+`/home/me/downloads/crystal_1`, `<local>` is `/home/me/downloads`. Files and 
+directories not corresponding to entries in the imgCIF file will be ignored.
 
 ### Examples
 
@@ -85,6 +92,12 @@ local file `/home/myself/downloads/cbf_b4_1.tar.bz2` in place of
 `https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2` whenever 
 encountered in `b4_master_remote.cif` (`-s` option). Store test image in file
 `b4_master_remote.cif.png` (`-o` option).
+
+```
+julia image_tests.jl --skip -o -s https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 /home/myself/downloads b4_master_remote.cif
+```
+As above, except `cbf_b4_1.tar.bz2` contents are searched for in `/home/myself/downloads`
+using the archived path.
 
 ```
 JULIA_DEBUG=Main julia image_tests.jl <filename>
