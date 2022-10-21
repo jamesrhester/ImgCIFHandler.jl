@@ -106,6 +106,8 @@ imgload(ext_info::DataFrame;local_copy = nothing, cached= Dict()) = begin
     not_in_cache = []
     if !isnothing(arch_paths)
         not_in_cache = filter( x-> !haskey(cached, ("$uri", x)) || cached[("$uri",x)] == "" , arch_paths)
+    else
+        not_in_cache = !haskey(cached,("$uri",nothing))
     end
 
     @debug "Not found in cache" not_in_cache uri
@@ -116,8 +118,10 @@ imgload(ext_info::DataFrame;local_copy = nothing, cached= Dict()) = begin
         temp_locals = download_images_os(uri, ext_info, local_copy, arch_paths)
     else
         @debug "Using cached files" arch_paths
-        temp_locals = map(arch_paths) do ap
-            cached[("$uri", ap)]
+        if arch_paths == nothing
+            temp_locals = [cached[("$uri",nothing)]]
+        else
+            temp_locals = map(ap -> cached[("$uri", ap)], arch_paths)
         end
     end
     
