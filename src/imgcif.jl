@@ -519,6 +519,47 @@ get_beam_centre(incif::CifContainer,args...) = begin
 end
 
 """
+    get_detector_normal(incif::CifContainer, scan_id, frame_no)
+
+Analog of cbf routine.  Note that curved detectors must raise an error.
+"""
+get_detector_normal(incif::CifContainer, scan_id, frame_no) = begin
+
+    # Follow the algorithm of cbflib
+
+    # TODO no answer for curved detector
+
+    get_pixel_normal(incif, 0, 0, scan_id, frame_no)
+end
+
+"""
+    get_pixel_normal(incif::CifContainer, slow, fast, scan_id, frame_no)
+
+Calculate the normal to the detector a pixel `slow, fast` when the detector
+is positioned for frame `frame_no` of scan `scan_id`.
+"""
+get_pixel_normal(incif::CifContainer, slow, fast, scan_id, frame_no) = begin
+
+    # As for cbflib
+
+    pixel00 = get_pixel_coordinates(incif, slow - 0.5, fast - 0.5, scan_id, frame_no)
+    pixel01 = get_pixel_coordinates(incif, slow - 0.5, fast + 0.5, scan_id, frame_no)
+    pixel10 = get_pixel_coordinates(incif, slow + 0.5, fast - 0.5, scan_id, frame_no)
+    pixel01 = pixel01 - pixel00
+    pixel10 = pixel10 - pixel00
+
+    normal = cross(pixel01, pixel10)
+
+    if dot(normal, normal) <= 0
+        throw(error("Cannot calculate normal to pixel $slow, $fast"))
+    end
+
+    normal = LinearAlgebra.normalize(normal)
+
+    return normal
+end
+
+"""
     scan_frame_from_img_name(u,name,cif_block)
 
 Return the scan_id, frame_id for the given `name` at URL `u` according to contents
@@ -747,15 +788,16 @@ get_scan_axis(cc,scan_id) = begin
 end
 
 """
-    find_peaks(im)
+    find_peaks(im; mindist = 10)
 
 A primitive peak-finding algorithm. No attempt is made to find all
 peaks. All pixels with values less than 1/2000 of the maximum are
 set to zero, then a Niblack binarisation algorithm is applied to
 produce a peak mask, which is reapplied to the original image
-and local maxima found.
+and local maxima found. `mindist` specifies the minimum distance
+in pixels that peaks must be separated in order to be kept.
 """
-find_peaks(im) = begin
+find_peaks(im; mindist=10) = begin
 
     # Find the maximum peak (not spurion) intensity
     
@@ -807,7 +849,7 @@ find_peaks(im) = begin
 
     @debug "Peak reject threshold" thresh
     
-    filter!(candidates) do c
+    Base.filter!(candidates) do c
         bound_x_lower = max(c[1]-10,1)
         bound_x_upper = min(c[1]+10,size(m_im,1))
         bound_y_lower = max(c[2]-10,1)
@@ -821,6 +863,28 @@ find_peaks(im) = begin
         
         maximum(view_area) > thresh
     end
+
+    # Filter peaks that are too close each other
+
+    keepers = Base.filter( candidates ) do c
+        
+        for x in candidates
+            
+            if x == c continue end
+
+            d = sqrt((x[1] - c[1])^2 + (x[2] - c[2])^2)
+
+            if d < mindist
+                @debug "Too close" d x c
+                return false
+            end
+
+        end
+        true
+
+    end
+
+    return keepers
 end
 
 """
@@ -942,10 +1006,10 @@ get_detector_coords(cc::CifContainer,scan_id,frame_no,r_coord) = begin
     # And the plane is described by a normal and point on the plane
 
     lambda = parse(Float64,cc["_diffrn_radiation_wavelength.value"][])
-    det_point = get_pixel_coordinates(cc,0,0,scan_id,frame_no)
-    normal = get_detector_normal("$(cc.original_file)",scan_id,frame_no)
-    det_intersect = detector_intersect(r_coord,lambda,normal,det_point)
-    det_coords = lab_to_det(cc,det_intersect,scan_id,frame_no)
+    det_point = get_pixel_coordinates(cc, 0, 0, scan_id, frame_no)
+    normal = get_detector_normal(cc, scan_id, frame_no)
+    det_intersect = detector_intersect(r_coord, lambda, normal, det_point)
+    det_coords = lab_to_det(cc, det_intersect, scan_id, frame_no)
 end
 
 """

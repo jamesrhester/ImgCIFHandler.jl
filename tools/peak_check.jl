@@ -43,7 +43,8 @@ create_peak_image(incif,peaklist;skip=3,range=2,kwargs...) = begin
     display_peak_table(all_images,"$(incif.original_file)"*"_peaks"*".png")
 end
 
-create_peak_area(incif,scan_id,frame_no,slow,fast;skip=3,range=2,window=10,local_version=Dict()) = begin
+create_peak_area(incif,scan_id,frame_no,slow,fast;skip=3,range=2,window=10,
+                 local_version=Dict(), cached=Dict()) = begin
 
     # find out our maximum frame number
 
@@ -70,7 +71,7 @@ create_peak_area(incif,scan_id,frame_no,slow,fast;skip=3,range=2,window=10,local
 
     # accumulate all the peaks
 
-    full_img = imgload(incif,frame_ids,local_version=local_version)
+    full_img = imgload(incif,frame_ids,local_version=local_version, cached = cached)
     fast_m,slow_m = size(full_img)
 
     # Window down

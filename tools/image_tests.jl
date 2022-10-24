@@ -29,7 +29,7 @@ directory, it is assumed to be the root directory
 when archive at URI is unpacked, otherwise it is
 the path to the local equivalent of the archive.
 """
-const CachedLocation = Dict{URI, String}
+const CachedLocation = Dict{String, String}
 
 is_archive(u) = begin
     long_ext = u[end-6:end]
@@ -285,7 +285,7 @@ of the image so that down on the image
 becomes down in real space. Returns the unrotated image and the rotation.
 If `peaks` is true, peaks are searched for.
 """
-create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,peaks=false) = begin
+create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,do_peaks=false) = begin
 
     # First detect mask and set to zero
 
@@ -293,7 +293,11 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,peaks=fals
 
     # Get a list of peaks for later
 
-    peaks = find_peaks(im)
+    peaks = []
+    
+    if do_peaks
+        peaks = find_peaks(im)
+    end
 
     @debug "Peaks found at" peaks
     
@@ -317,7 +321,7 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,peaks=fals
     
     # Adjust geometry if we know gravity
 
-    if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,do_transpose,0,[] end
+    if !gravity || !("gravity" in incif["_axis.equipment"]) return im_new,do_transpose,0,peaks end
 
     gravity = indexin(["gravity"],incif["_axis.equipment"])[]
     grav_vec = get_axis_vector(incif,incif["_axis.id"][gravity])
@@ -365,7 +369,7 @@ create_check_image(incif,im;logscale=true,cut_ratio=1000,gravity=true,peaks=fals
     end
 
     #im_new = rotl90(im_new,rot)
-    
+
     return im_new,do_transpose,rot*90,peaks
 end
 
@@ -567,6 +571,9 @@ draw_axes(height,width,angle,names;border=30) = begin
 end
 
 draw_peaks(width,height,scale,transp,angle,peaks;border=30) = begin
+
+    @debug "Drawing $(length(peaks)) peaks"
+    
     setcolor("blue")
     origin(Point(border,border))   #top left
     for op in peaks
@@ -731,12 +738,12 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
         # Output an image
         
-        new_im,transp,rot,peaks = create_check_image(incif,testimage,logscale=false)
+        new_im,transp,rot,peaks = create_check_image(incif,testimage,logscale=false, do_peaks = true)
         scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
         
         imgfn = nothing
         if savepng
-            annotate_check_image(new_im,transp,rot,incif,scan_id=scan_id,frame_no=frame_no,peaks=peaks)
+            annotate_check_image(new_im,transp,rot,incif,scan_id=scan_id,frame_no=frame_no, peaks = peaks)
         else
             show_check_image(new_im,transp,rot)
         end
@@ -760,7 +767,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
                 peakvals = map(reverse,peakvals)  #fast,slow -> slow,fast
             end
 
-            create_peak_image(incif,peakvals,local_version=subs)
+            create_peak_image(incif,peakvals,local_version=subs, cached=all_archives)
         end
     end
     
@@ -848,7 +855,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-10-20\n")
+    println("\n ImgCIF checker version 2022-10-24\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
