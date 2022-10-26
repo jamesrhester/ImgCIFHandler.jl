@@ -53,6 +53,8 @@ export bin_id_from_scan_frame #Convert scan/frame_no into binary id
 export scan_frame_from_bin_id #Convert bin_id into scan/frame
 export peak_to_frames #Calculate all peak appearances
 export get_dependency_chain #Get the dependent axes of an axis
+export Peak
+export intensity, coords, frame, scan, dist #Working with peaks
 
 include("hdf_image.jl")
 include("cbf_image.jl")

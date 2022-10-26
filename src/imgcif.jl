@@ -787,6 +787,38 @@ get_scan_axis(cc,scan_id) = begin
     return dslf[!,"$c.axis_id"][],start,finish,increment
 end
 
+struct Peak
+    scan_id::String
+    frame_no::Int64
+    slow::Float64
+    fast::Float64
+    intensity::Float64
+end
+
+Peak(scan_id::String, frame_no, peak_info) = begin
+    x, intensity = peak_info
+    Peak(scan_id, frame_no, x[2], x[1], intensity)
+end
+
+Peak(scan_id::String, frame_no::Int64, slow, fast) = Peak(scan_id, frame_no, slow, fast, 0)
+
+Peak(scan_id::String, frame_no::Float64, slow, fast, i) = begin
+    Peak(scan_id, round(Int64,frame_no) ,slow, fast, i)
+end
+         
+intensity(p::Peak) = p.intensity
+coords(p::Peak) = p.slow, p.fast
+frame(p::Peak) = p.frame_no
+scan(p::Peak) = p.scan_id
+
+dist(p1::Peak, p2::Peak) = begin
+    sqrt((p1.slow - p2.slow)^2 + (p1.fast - p2.fast)^2)
+end
+
+Base.show(io::IO, p::Peak) = begin
+    write(io, "$(p.scan_id) $(p.frame_no) $(p.slow) $(p.fast) $(p.intensity)")
+end
+
 """
     find_peaks(im; mindist = 10)
 
@@ -795,7 +827,8 @@ peaks. All pixels with values less than 1/2000 of the maximum are
 set to zero, then a Niblack binarisation algorithm is applied to
 produce a peak mask, which is reapplied to the original image
 and local maxima found. `mindist` specifies the minimum distance
-in pixels that peaks must be separated in order to be kept.
+in pixels that peaks must be separated in order to be kept. The
+routine returns fast, slow, max intensity
 """
 find_peaks(im; mindist=10) = begin
 
@@ -849,7 +882,7 @@ find_peaks(im; mindist=10) = begin
 
     @debug "Peak reject threshold" thresh
     
-    Base.filter!(candidates) do c
+    c_with_int = map(candidates) do c
         bound_x_lower = max(c[1]-10,1)
         bound_x_upper = min(c[1]+10,size(m_im,1))
         bound_y_lower = max(c[2]-10,1)
@@ -861,18 +894,20 @@ find_peaks(im; mindist=10) = begin
 
         view_area[findlocalmaxima(view_area)[1]] = 0
         
-        maximum(view_area) > thresh
+        c, maximum(view_area)
     end
 
-    # Filter peaks that are too close each other
+    # Filter peaks that are too close each other or not intense enough
 
-    keepers = Base.filter( candidates ) do c
+    keepers = Base.filter( c_with_int ) do c
         
-        for x in candidates
-            
-            if x == c continue end
+        for (x, intensity) in c_with_int
 
-            d = sqrt((x[1] - c[1])^2 + (x[2] - c[2])^2)
+            if intensity < thresh return false end
+            
+            if x == c[1] continue end
+
+            d = sqrt((x[1] - c[1][1])^2 + (x[2] - c[1][2])^2)
 
             if d < mindist
                 @debug "Too close" d x c
@@ -888,15 +923,13 @@ find_peaks(im; mindist=10) = begin
 end
 
 """
-    peak_to_frames(pixel_coords,scan_id,frame_no,cc::CifContainer;single=false)
+    peak_to_frames(p::Peak, cc::CifContainer;single=false)
 
-Given (slow,fast) pixel coordinates on the detector for `frame_no` of
-`scan_id`, return an array of scan id,
-frame number and (slow,fast) coordinate that the pixel should appear, if
-at all. Return is [(scan_id, frame number, slow, fast),...]. If only
-`scan_id` should be checked, `single` should be true.
+Given peak `p`, return an array of peaks that the pixel should appear,
+if at all. If only peaks from the same scan should be checked,
+`single` should be true.  
 """
-peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
+peak_to_frames(p::Peak, cc;single=false) = begin
 
     # Get useful constants
     
@@ -913,12 +946,14 @@ peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
     # Get zero-rotation reciprocal coordinates
     
     filename = "$(cc.original_file)"
-    slow,fast = pixel_coords
-    recip_coords = get_recip_point(cc,slow,fast,scan_id,frame_no)
+    slow,fast = coords(p)
+    scan_id = scan(p)
+    frame_no = frame(p)
+    recip_coords = get_recip_point(cc, slow, fast, scan_id, frame_no)
 
     # Loop over scans looking for intersections
 
-    found_list = []
+    found_list = Peak[]
     all_scans = single ? [scan_id] : cc["_diffrn_scan.id"]
     for one_scan in all_scans
 
@@ -971,7 +1006,7 @@ peak_to_frames(pixel_coords,scan_id,frame_no,cc;single=false) = begin
                 @debug "Det coords" x y
                 if x > 0 && y > 0 && x <= slow_num && y <= fast_num
                     @debug "Found!"
-                    push!(found_list,[one_scan,n,x,y])
+                    push!(found_list,Peak(one_scan,n,x,y, intensity(p)))
                 end
             else
                 @debug "Rejecting, frame no $n > $no_frames"

@@ -3,9 +3,9 @@
 #  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(@__DIR__) #uncomment for release version
 
-using ImgCIFHandler#main
+using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
 using ImageTransformations
 using ArgParse
@@ -466,6 +466,8 @@ annotate_check_image(im, transp, rot, incif;border=30,hsize=512,scan_id=nothing,
     ax_labels = get_surface_axes(incif)
     if transp ax_labels = reverse(ax_labels) end
     draw_axes(height_new,width_new,rot,ax_labels)
+
+    peaks = [x[1] for x in peaks]   #ignore intensity
     draw_peaks(width_orig,height_orig,scale_factor,transp,rot,peaks)
 
     # output
@@ -758,16 +760,8 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         # Generate the peak checking image
 
         if peak_check
-            if length(peakvals) == 0
-
-                # Use peaks from our check image run
-                
-                peakvals = map(x->[scan_id,frame_no,x[2],x[1]],peaks)
-            else
-                peakvals = map(reverse,peakvals)  #fast,slow -> slow,fast
-            end
-
-            create_peak_image(incif,peakvals,local_version=subs, cached=all_archives)
+            predicted = accumulate_peaks(incif, local_version=subs, cached=all_archives)
+            create_peak_image(incif,predicted,local_version=subs, cached=all_archives)
         end
     end
     
@@ -825,7 +819,7 @@ parse_cmdline(d) = begin
         "--peakval"
         nargs = 4
         metavar = ["scan","frame","fast","slow"]
-        help = "Coordinates of a peak to include in peak check. Implies --peaks. <fast> is the fast direction on the detector, typically horizontal. If only one scan, <scan> is
+        help = "(Not implemented). Coordinates of a peak to include in peak check. Implies --peaks. <fast> is the fast direction on the detector, typically horizontal. If only one scan, <scan> is
 ignored (but must be provided)."
         "-s", "--sub"
         nargs = 2
@@ -855,7 +849,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-10-24\n")
+    println("\n ImgCIF checker version 2022-10-27\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
