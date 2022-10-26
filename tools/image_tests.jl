@@ -760,8 +760,15 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         # Generate the peak checking image
 
         if peak_check
-            predicted = accumulate_peaks(incif, local_version=subs, cached=all_archives)
-            create_peak_image(incif,predicted,local_version=subs, cached=all_archives)
+
+            # Don't do it unless we have local files
+
+            if length(all_archives) == 0
+                @error "Peak checking requires local unpacked archives"
+            else
+                predicted = accumulate_peaks(incif, local_version=subs, cached=all_archives)
+                create_peak_image(incif,predicted,local_version=subs, cached=all_archives)
+            end
         end
     end
     
