@@ -100,6 +100,14 @@ As above, except `cbf_b4_1.tar.bz2` contents are searched for in `/home/myself/d
 using the archived path.
 
 ```
+julia image_tests.jl -s https://zenodo.org/record/12345/files/my_crystal2.tar.bz2 /home/me/unpacked_data --skip -o --peaks my_crystal_2.cif
+```
+Create a peak check "fingerprint" to make sure axis orientations and settings are correct in
+`my_crystal_2.cif`. Local directory `/home/me/unpacked_data` contains the contents of remote
+location `https://zenodo.org/record/12345/files/my_crystal2.tar.bz2`. Non-image checks
+are skipped.
+![An example peak fingerprint][peak_fingerprint.png]
+```
 JULIA_DEBUG=Main julia image_tests.jl <filename>
 ```
 or
@@ -108,3 +116,5 @@ JULIA_DEBUG=ImgCIFHandler julia image_tests.jl <filename>
 ```
 
 Provide extra debugging output during the run that may or may not help.
+
+[peak_fingerprint.png]: 
