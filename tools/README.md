@@ -83,7 +83,8 @@ As above, but use the 3rd image (`-p 3`) found in the archive instead of
 the first image and output (`-o`) a test image to file instead of terminal.
 
 ```
-julia image_tests.jl --skip -o -s https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 /home/myself/downloads/cbf_b4_1.tar.bz2 b4_master_remote.cif
+julia image_tests.jl --skip -o -s https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 
+/home/myself/downloads/cbf_b4_1.tar.bz2 b4_master_remote.cif
 ```
 
 Do not verify imgCIF metadata (`--skip`), running tests only on the images
@@ -94,19 +95,23 @@ encountered in `b4_master_remote.cif` (`-s` option). Store test image in file
 `b4_master_remote.cif.png` (`-o` option).
 
 ```
-julia image_tests.jl --skip -o -s https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 /home/myself/downloads b4_master_remote.cif
+julia image_tests.jl --skip -o -s https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 
+/home/myself/downloads b4_master_remote.cif
 ```
 As above, except `cbf_b4_1.tar.bz2` contents are searched for in `/home/myself/downloads`
 using the archived path.
 
 ```
-julia image_tests.jl -s https://zenodo.org/record/12345/files/my_crystal2.tar.bz2 /home/me/unpacked_data --skip -o --peaks my_crystal_2.cif
+julia image_tests.jl -s https://zenodo.org/record/12345/files/my_crystal2.tar.bz2 
+/home/me/unpacked_data --skip -o --peaks my_crystal_2.cif
 ```
 Create a peak check "fingerprint" to make sure axis orientations and settings are correct in
 `my_crystal_2.cif`. Local directory `/home/me/unpacked_data` contains the contents of remote
 location `https://zenodo.org/record/12345/files/my_crystal2.tar.bz2`. Non-image checks
 are skipped.
+
 ![An example peak fingerprint](peak_fingerprint.png)
+
 ```
 JULIA_DEBUG=Main julia image_tests.jl <filename>
 ```
