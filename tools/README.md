@@ -106,7 +106,7 @@ Create a peak check "fingerprint" to make sure axis orientations and settings ar
 `my_crystal_2.cif`. Local directory `/home/me/unpacked_data` contains the contents of remote
 location `https://zenodo.org/record/12345/files/my_crystal2.tar.bz2`. Non-image checks
 are skipped.
-![An example peak fingerprint][peak_fingerprint.png]
+![An example peak fingerprint](peak_fingerprint.png)
 ```
 JULIA_DEBUG=Main julia image_tests.jl <filename>
 ```
