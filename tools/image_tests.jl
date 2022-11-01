@@ -858,7 +858,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-10-27\n")
+    println("\n ImgCIF checker version 2022-11-01\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
@@ -873,12 +873,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     if parsed_args["output-png"] parsed_args["check-images"] = true end
     if length(parsed_args["peakval"])>0
-
         parsed_args["peaks"] = true
-        peakvals = map(parsed_args["peakval"]) do p
-            Peak(p[1], parse(Int64,p[2]) , parse(Float64, p[4]),
-                 parse(Float64, p[3]))
-        end
+    end
+    
+    peakvals = map(parsed_args["peakval"]) do p
+        Peak(p[1], parse(Int64,p[2]) , parse(Float64, p[4]),
+             parse(Float64, p[3]))
     end
     
     if parsed_args["peaks"]
