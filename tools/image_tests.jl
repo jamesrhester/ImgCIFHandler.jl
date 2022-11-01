@@ -766,7 +766,8 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
             if length(all_archives) == 0
                 @error "Peak checking requires local unpacked archives"
             else
-                predicted = accumulate_peaks(incif, local_version=subs, cached=all_archives)
+                predicted = accumulate_peaks(incif, peakvals=peakvals, local_version=subs, cached=all_archives)
+                @debug "Predicted peaks" predicted
                 create_peak_image(incif,predicted,local_version=subs, cached=all_archives)
             end
         end
@@ -826,7 +827,8 @@ parse_cmdline(d) = begin
         "--peakval"
         nargs = 4
         metavar = ["scan","frame","fast","slow"]
-        help = "(Not implemented). Coordinates of a peak to include in peak check. Implies --peaks. <fast> is the fast direction on the detector, typically horizontal. If only one scan, <scan> is
+        action = "append_arg"
+        help = "Coordinates of a peak to include in peak check. Implies --peaks. <fast> is the fast direction on the detector, typically horizontal. If only one scan, <scan> is
 ignored (but must be provided)."
         "-s", "--sub"
         nargs = 2
@@ -861,6 +863,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
     if parsed_args["dictionary"] != [""]
     end
 
+    @debug "Parsed arguments" parsed_args
+    
     # Fix loops
 
     fix_loops!(incif[blockname])
@@ -868,7 +872,15 @@ if abspath(PROGRAM_FILE) == @__FILE__
     # Fix logic
 
     if parsed_args["output-png"] parsed_args["check-images"] = true end
-    if length(parsed_args["peakval"])>0 parsed_args["peaks"] = true end
+    if length(parsed_args["peakval"])>0
+
+        parsed_args["peaks"] = true
+        peakvals = map(parsed_args["peakval"]) do p
+            Peak(p[1], parse(Int64,p[2]) , parse(Float64, p[4]),
+                 parse(Float64, p[3]))
+        end
+    end
+    
     if parsed_args["peaks"]
         parsed_args["output-png"] = true
         parsed_args["full-download"] = true
@@ -885,7 +897,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 savepng = parsed_args["output-png"],
                                 skip = parsed_args["skip"],
                                 peak_check = parsed_args["peaks"],
-                                peakvals = parsed_args["peakval"]
+                                peakvals = peakvals
                                 )
     println("\n====End of Checks====")
     if result exit(0) else exit(1) end

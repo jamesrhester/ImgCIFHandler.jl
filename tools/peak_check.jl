@@ -1,50 +1,65 @@
 # Routines for checking peak locations
 """
-    accumulate_peaks(incif; maxframes=10, maxpeaks=10)
+    accumulate_peaks(incif; peakvals = [], maxframes=10, maxpeaks=10, local_version = Dict(), cached = Dict())
 
 Work through up to `maxframes` images from incif until
 up to `maxpeaks` peaks have been found that have predicted
-positions in at least one of the other frames. 
+positions in at least one of the other frames. Use `local_version`
+and `cached` as a source for images. If `peakvals` is not empty,
+use those as a source of peaks. Each entry in `peakvals` is
+of the form `scan, frameno, fast, slow` .
 """
-accumulate_peaks(incif; scan_id = nothing, maxframes = 10, maxpeaks = 10, local_version = Dict(), cached = Dict()) = begin
+accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes = 10, maxpeaks = 10, local_version = Dict(), cached = Dict()) = begin
 
-    # Choose the scan and frames (first 10 basically)
-
-    if isnothing(scan_id)
-        scan_id = incif["_diffrn_scan.id"][1]
-    end
     
-    no_frames = parse(Int64,incif["_diffrn_scan.frames"][1])
-    no_frames = min(maxframes, no_frames)
-
-    # Find identifiers
-
-    frame_ids = bin_id_from_scan_frame.(Ref(incif),scan_id, 1:no_frames)
-    filter!(x->length(x) == 1, frame_ids)  #can't handle multi-image frames for now
-
-    if length(frame_ids) == 0
-        throw(error("Frame $scan_id/$frame_no not found or consists of multiple images which is not yet supported"))
-    end
-
-    frame_ids = map(x->x[],frame_ids)
-
-    # Now get the peaks
-
     good_peaks = Vector{Peak}[]
-    for fi in 1:no_frames
 
-        full_img = imgload(incif, frame_ids[fi], local_version=local_version, cached = cached)
-        apply_mask!(incif, full_img)
-        peaks = Peak.(scan_id, fi, find_peaks(full_img))
-        for p in peaks
+    if length(peakvals) == 0
+        
+        # Choose the scan and frames (first 10 basically)
+
+        if isnothing(scan_id)
+            scan_id = incif["_diffrn_scan.id"][1]
+        end
+        
+        no_frames = parse(Int64,incif["_diffrn_scan.frames"][1])
+        no_frames = min(maxframes, no_frames)
+
+        # Find identifiers
+
+        frame_ids = bin_id_from_scan_frame.(Ref(incif),scan_id, 1:no_frames)
+        filter!(x->length(x) == 1, frame_ids)  #can't handle multi-image frames for now
+
+        if length(frame_ids) == 0
+            throw(error("Frame $scan_id/$frame_no not found or consists of multiple images which is not yet supported"))
+        end
+
+        frame_ids = map(x->x[],frame_ids)
+
+        # Now get the peaks
+        
+        for fi in 1:no_frames
+
+            full_img = imgload(incif, frame_ids[fi], local_version=local_version, cached = cached)
+            apply_mask!(incif, full_img)
+            peaks = Peak.(scan_id, fi, find_peaks(full_img))
+            for p in peaks
+                merge_peak!(good_peaks, p, incif)
+            end
+
+            if length(good_peaks) > maxpeaks
+                break
+            end
+        end
+        
+    else    # we have been provided with peaks
+        
+        for p in peakvals
             merge_peak!(good_peaks, p, incif)
         end
 
-        if length(good_peaks) > maxpeaks
-            break
-        end
     end
-                    
+            
     @debug "Found $(length(good_peaks)) multi peaks" good_peaks
 
     # tabulate the peaks
