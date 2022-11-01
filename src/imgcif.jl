@@ -195,6 +195,7 @@ get_dependency_chain(imgcif::CifContainer,axis_id) = begin
         if dep_axis == nothing break end
         if dep_axis in dep_chain
             @error "Dependency loop for axes" dep_axis dep_chain ex=ErrorException
+            throw(error("Dependency loop: $dep_axis is already in $dep_chain"))
         end
         push!(dep_chain,dep_axis)
         current_axis = dep_axis
