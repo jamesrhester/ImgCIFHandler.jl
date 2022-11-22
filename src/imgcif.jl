@@ -801,11 +801,9 @@ Peak(scan_id::String, frame_no, peak_info) = begin
     Peak(scan_id, frame_no, x[2], x[1], intensity)
 end
 
-Peak(scan_id::String, frame_no::Int64, slow, fast) = Peak(scan_id, frame_no, slow, fast, 0)
-
-Peak(scan_id::String, frame_no::Float64, slow, fast, i) = begin
-    Peak(scan_id, round(Int64,frame_no) ,slow, fast, i)
-end
+Peak(scan_id::String, frame_no::Float64, args...) = Peak(scan_id, round(Int64,frame_no), args...)
+    
+Peak(scan_id::String, frame_no, slow, fast) = Peak(scan_id, frame_no, slow, fast, 0)
          
 intensity(p::Peak) = p.intensity
 coords(p::Peak) = p.slow, p.fast
@@ -949,7 +947,7 @@ peak_to_frames(p::Peak, cc;single=false) = begin
     filename = "$(cc.original_file)"
     slow,fast = coords(p)
     scan_id = scan(p)
-    frame_no = frame(p)
+    frame_no = frame(p) + 0.5
     recip_coords = get_recip_point(cc, slow, fast, scan_id, frame_no)
 
     # Loop over scans looking for intersections

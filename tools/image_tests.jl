@@ -3,7 +3,7 @@
 #  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
-Pkg.activate(@__DIR__) #uncomment for release version
+# Pkg.activate(@__DIR__) #uncomment for release version
 
 using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
@@ -11,6 +11,7 @@ using ImageTransformations
 using ArgParse
 using CrystalInfoFramework,FilePaths,URIs, Tar
 using Luxor
+using Statistics
 
 # Tests for imgCIF files
 const test_list = []
@@ -267,8 +268,8 @@ improve_contrast(im;cut_ratio=1000) = begin
     clamp_low,clamp_high = find_best_cutoff(im,cut_ratio=cut_ratio)
     alg = LinearStretching(src_maxval = clamp_high)
     im_new = adjust_histogram(im,alg)
-    alg = Equalization(nbins=256,maxval = maximum(im))
-    im_new = adjust_histogram(im_new,alg)
+    #alg = Equalization(nbins=256,maxval = maximum(im_new))
+    #im_new = adjust_histogram(im_new,alg)
     
     @debug "Max, min for adjusted image:" maximum(im_new) minimum(im_new)
 
@@ -587,7 +588,7 @@ end
 show_check_image(im::AbstractArray,transp,rot) = begin
     println("Image for checking")
     if transp im = permutedims(im) end
-    imshow(Gray.(rotl90(im,div(rot,90))))
+    display(Gray.(rotl90(im,div(rot,90))))
     println("\n")
 end
 
@@ -596,10 +597,20 @@ Find the best value for displaying a diffraction image, calculated as the first
 intensity bin that has 1000 times less points than the highest. Based on the
 logic that the highest value will be a "typical" background point. Skip any
 that correspond to negative values as these are likely to have a different
-meaning.
+meaning.  Drop any points that are separated by 40 bins from the next
+lowest point.
 """
 find_best_cutoff(im;cut_ratio=1000) = begin
     edges,bins = ImageContrastAdjustment.build_histogram(im)
+    dropped = 0
+    while sum(bins[end-10:end-1]) == 0 && dropped < 10
+        @debug "Dropping high outlier" maximum(im)
+        im[argmax(im)] = median(im)
+        dropped += 1
+        edges,bins = ImageContrastAdjustment.build_histogram(im)
+    end
+
+    @debug "Finished removing high outliers" edges bins
     # Find largest number of points > 0
     maxpts = 0
     maxpos = 0

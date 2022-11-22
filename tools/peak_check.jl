@@ -55,7 +55,16 @@ accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes = 10, maxpea
     else    # we have been provided with peaks
         
         for p in peakvals
-            merge_peak!(good_peaks, p, incif)
+
+            # Refine target frame
+            
+            _, new_p = create_peak_area(incif, p;skip=1, range=5,
+                                                local_version = local_version,
+                                                cached = cached)
+            
+            @debug "Old, new peaks:" p new_p
+
+            merge_peak!(good_peaks, new_p, incif)
         end
 
     end
@@ -112,7 +121,7 @@ merge_peak!(good_peaks::Vector{Vector{Peak}}, new_peak::Peak, incif) = begin
 end
 
 """
-    create_peak_image(incif,peaklist::Vector{Vector{Peak}};skip=3,range=2)
+    create_peak_image(incif,peaklist::Vector{Vector{Peak}};skip=1,range=5)
 
 Peak list contains a list of observed peaks and equivalents in form
 for each independent peak. This
@@ -120,9 +129,9 @@ routine presents an excerpt of the relevant scans near the predicted
 positions. The excerpt is created by adding all images over a range of
 `range` frames each side of the predicted frame, using every `skip`
 image. So the default values will use 5 images, where each image is
-separated by 3 frames, for a total "frame range" of 13.  
+separated by 1 frames.  
 """
-create_peak_image(incif,predicted::Vector{Vector{Peak}};skip=-1,range=-1,kwargs...) = begin
+create_peak_image(incif,predicted::Vector{Vector{Peak}};redo=true, skip=1,range=5,kwargs...) = begin
 
     if skip < 0 || range < 0
         skip, range = guess_skip_range(incif)
@@ -135,7 +144,11 @@ create_peak_image(incif,predicted::Vector{Vector{Peak}};skip=-1,range=-1,kwargs.
         image_set =  []
         for p in one_pred_set
             @debug "Processing:" p
-            one_img = create_peak_area(incif,p;skip=skip,range=range,kwargs...)
+            one_img, max_peak = create_peak_area(incif, p;skip=skip,range=range,kwargs...)
+            @debug "max peak" max_peak
+            if frame(max_peak) != frame(p)
+                @warn "Max peak intensity $(intensity(max_peak)) in frame $(frame(max_peak)), not $(frame(p))"
+            end
             push!(image_set,one_img)
         end
         push!(all_images,image_set)
@@ -146,7 +159,7 @@ create_peak_image(incif,predicted::Vector{Vector{Peak}};skip=-1,range=-1,kwargs.
     display_peak_table(all_images,"$(incif.original_file)"*"_peaks"*".png")
 end
 
-create_peak_area(incif,p::Peak;skip=3,range=2,window=10, local_version=Dict(), cached=Dict()) = begin
+create_peak_area(incif,p::Peak;skip=1,range=5,window=10, local_version=Dict(), cached=Dict()) = begin
 
     # find out our maximum frame number
 
@@ -173,25 +186,44 @@ create_peak_area(incif,p::Peak;skip=3,range=2,window=10, local_version=Dict(), c
     
     @debug "Frames for peak:" frame_ids
 
-    # accumulate all the peaks
-
-    full_img = imgload(incif,frame_ids,local_version=local_version, cached = cached)
-    fast_m,slow_m = size(full_img)
-
-    # Window down and remove negative values
-
     slow, fast = coords(p)
     slow = Int(round(slow))
     fast = Int(round(fast))
-    
-    corners = (max(1,slow-window),max(1,fast-window),min(slow_m,slow+window),min(fast_m,fast+window))
+    full_img = imgload(incif, frame_ids[1], local_version=local_version, cached = cached)
+    fast_m, slow_m = size(full_img)
 
-    full_img = full_img[corners[2]:corners[4],corners[1]:corners[3]]
-    for i in eachindex(full_img)
-        full_img[i] = full_img[i] < 0 ? 0 : full_img[i]
+    # accumulate all the peaks
+
+    frame_max = -1
+    max_val = -1
+    max_coords = fast, slow
+    corners = (max(1,slow-window),max(1,fast-window),min(slow_m,slow+window),min(fast_m,fast+window))
+    acc_img = zeros(corners[4]-corners[2]+1, corners[3]-corners[1]+1)
+    
+    for fid in frame_ids
+        full_img = imgload(incif, fid, local_version=local_version, cached = cached)
+
+    # Window down and remove negative values
+
+        full_img = full_img[corners[2]:corners[4],corners[1]:corners[3]]
+        for i in eachindex(full_img)
+            full_img[i] = full_img[i] < 0 ? 0 : full_img[i]
+        end
+
+        max_img = maximum(full_img)
+        if max_img > max_val
+            frame_max = fid
+            max_val = max_img
+            max_coords = Tuple(argmax(full_img))
+            @debug "New peak pos" max_coords
+        end
+
+        acc_img += full_img
     end
-                     
-    full_img/maximum(full_img)
+
+    frame_max = indexin([frame_max],frame_ids)[]
+    max_peak = Peak(scan_id, frame_nos[frame_max], max_coords[2]+corners[1], max_coords[1] + corners[2], max_val)
+    acc_img/maximum(acc_img), max_peak
 end
 
 """
@@ -203,6 +235,11 @@ dimensions.
 """
 display_peak_table(image_list,fname) = begin
 
+    if length(image_list) == 0
+        @warn "No peaks found, use --peakval to manually indicate peak positions"
+        return
+    end
+    
     # Calculate layout parameters based on image size
 
     one_ht = one_wid = 0
@@ -252,7 +289,7 @@ guess_skip_range(incif) = begin
     all_steps = filter(x -> !ismissing(x) && !isnothing(x), all_steps)
     all_steps = [ abs(parse.(Float64, a)) for a in all_steps ]
     step = maximum(all_steps)
-    range = ceil(Int64, 5.0/step)
+    range = ceil(Int64, 1.0/step)
 
     # Now we want no more than 5 images either side but assume a skip
     # of more than 3 might miss a peak
