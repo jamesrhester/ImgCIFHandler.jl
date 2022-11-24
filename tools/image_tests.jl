@@ -3,7 +3,7 @@
 #  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
-# Pkg.activate(@__DIR__) #uncomment for release version
+Pkg.activate(@__DIR__) #uncomment for release version
 
 using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
