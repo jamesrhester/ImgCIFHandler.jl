@@ -186,7 +186,8 @@ download_images_os(uri, ext_info, local_copy, arch_paths)  = begin
 
     if arch_type == "TGZ" decomp_option = "-z" end
     if arch_type == "TBZ" decomp_option = "-j" end
-    if arch_type in ("TGZ","TBZ","TAR")
+    if arch_type == "TXZ" decomp_option = "-J" end
+    if arch_type in ("TGZ","TBZ","TAR","TXZ")
         if local_copy == nothing
             push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
         else
@@ -492,6 +493,7 @@ peek_image(uri::URI,arch_type,cif_block::CifContainer;entry_no=0,check_name=true
     decomp_option = ""
     if arch_type == "TGZ" decomp_option = "-z"
     elseif arch_type == "TBZ" decomp_option = "-j"
+    elseif arch_type == "TXZ" decomp_option = "-J"
     else throw(error("Unrecognised archive type $arch_type"))
     end
 

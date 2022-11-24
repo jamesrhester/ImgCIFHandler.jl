@@ -118,7 +118,7 @@ get_archive_member_name(incif;pick=1, subs=CachedLocation()) = begin
             # Extract a single file if we have an archive
             
             x = ""
-            if arch_type in ("TBZ","TGZ","TAR")
+            if arch_type in ("TBZ", "TGZ", "TAR", "TXZ")
                 try
                     x = peek_image(loc,arch_type,incif,check_name=false,entry_no=pick)
                 catch exn
@@ -139,6 +139,12 @@ get_archive_member_name(incif;pick=1, subs=CachedLocation()) = begin
             for (root, dirs, files) in walkdir(subs[u])
                 if length(files) > 0
                     root_rel = relpath(root, subs[u])
+
+                    # A tar archive will not use "." as the root
+                    
+                    if root_rel == "."
+                        root_rel = ""
+                    end
 
                     @debug "Root path is" root_rel
                     for f in files
@@ -869,7 +875,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
         blockname = parsed_args["blockname"]
     end
     subs = Dict(parsed_args["sub"])
-    println("\n ImgCIF checker version 2022-11-01\n")
+
+    # Convert local directories to absolute paths
+
+    for (k,v) in subs
+        subs[k] = abspath(expanduser(v))
+    end
+    
+    println("\n ImgCIF checker version 2022-11-24\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
