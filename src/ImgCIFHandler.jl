@@ -38,6 +38,7 @@ using ImageFiltering
 using Statistics
 using Rotations
 
+export create_archives  #register an archive
 export imgload         #Load raw data
 export peek_image      #Find first image in archive
 export make_absolute_uri #Use Cif block contents to make absolute URI
@@ -65,67 +66,284 @@ include("recip.jl")
 get_image_ids(c::CifContainer) = begin
     return c["_array_data.binary_id"]
 end
-    
-"""
-    imgload(c::Block,array_ids;local_version=Dict())
 
-Return the image referenced in CIF Block `c` corresponding to the specified raw array identifiers.
-`local_version` gives local copies for URLs listed in `c`. `cached` is a list of files that are
-already available locally as a dictionary `{URI, path}=>local_path`. On failure returns 
-a string containing an error message.
+# Archive types
 """
-imgload(c::CifContainer,bin_ids;local_version=Dict(), cached = Dict()) = begin
+In order to access images, an archive must be specified,
+and then supplied to the `imgload` routine. To avoid
+re-downloading on each call, this archive should be
+created separately.
 
-    dl_info = external_specs_from_bin_ids(bin_ids,c)
+An archive is either remote, or local. A local archive may
+have a remote equivalent, such that it is a cached version.
+We provide routines to convert from remote to local, which
+involves downloading selected files.
+"""
+abstract type ImageArchive end
+
+"""
+A `BulkArchive` consists of a single file containing all image
+frames.
+"""
+abstract type BulkArchive <: ImageArchive end
+
+abstract type CompressedArchive <: BulkArchive end
+abstract type CompressedTarArchive <: CompressedArchive end
+
+"""
+In an `AddressableArchive` each frame can be referenced
+by an individual, unique URL
+""" 
+abstract type AddressableArchive <: ImageArchive end
+
+"""
+A tar archive has been created by tar and then optionall
+compressed. The type parameter T refers to the compression used in
+the tar archive. To add a new compression type add it
+to the `decomp_option` method.
+"""
+struct TarArchive{T} <: CompressedTarArchive
+    local_cache::AbstractString
+    original_url::URI
+end
+
+struct ZipArchive <: CompressedArchive
+    local_cache::AbstractString
+    original_url::URI
+end
+
+create_archives(c::Cif; kwargs...) = create_archive(first(c).second; kwargs...)
+
+"""
+    create_archives(c::CifContainer; subs = Dict())
+
+Create a series of ImageArchive objects, one for each distinct location
+in `c`. Note that a distinct location is not necessarily a distinct URL,
+as rsync: and file: URLs may be unique for each frame but correspond
+to a single directory.
+"""
+create_archives(c::CifContainer; subs = Dict()) = begin
+
+    cat_name = "_array_data_external_data"
+    arch_type = haskey(c, "$cat_name.archive_format") ? unique(c["$cat_name.archive_format"]) : nothing
     
-    local_copy =  get(local_version,"$(dl_info[1,:uri])", nothing)
-    @debug "Loading image from" local_copy
+    dl_info = unique(c["$cat_name.uri"])
+    test_uris = URI.(dl_info)
+    schemes = unique([ x.scheme for x in test_uris])
+
+    # Check for sanity
+
+    if length(schemes) > 1
+        throw(error("More than one URI scheme present in file: $schemes"))
+    end
+    schemes = schemes[]
+
+    if !isnothing(arch_type) && length(arch_type) > 1
+        throw(error("More than one archive type present in file: $arch_type"))
+    elseif !isnothing(arch_type)
+        arch_type = arch_type[]
+    end
+
+    # Per-frame URIs are special
     
-    imgload(dl_info,local_copy = local_copy, cached = cached)
+    if schemes in ["file", "rsync"]
+        test_uris = test_uris[1:1]
+    end
+        
+    create_archives(test_uris; arch_type = arch_type, subs = subs)
+    
+end
+
+create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict()) = begin
+
+    arch_list = []
+
+    uq_u = unique(u)
+    
+    base_dirs = map(uq_u) do one_uri
+        if one_uri in keys(subs)
+            subs[one_uri]
+        else
+            mktempdir()
+        end
+    end
+
+    if arch_type in ("TBZ","TGZ","TXZ","TAR")
+        for (one_uri, bd) in zip(uq_u, base_dirs)
+            push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri))
+        end
+        return arch_list
+    end
+
+    if arch_type == "ZIP"
+        for (one_uri, bd) in zip(uq_u, base_dirs)
+            push!(arch_list, ZipArchive(bd, one_uri))
+        end
+        return arch_list
+    end
+    
+    # "file" schemes pointing to compressed archives are covered by
+    # the types above. Do not mix schemes.
+
+    if first(u).scheme == "file" || first(u).scheme == ""
+        return [LocalArchive()]
+    end
+
+    if first(u).scheme == "rsync"
+        return [RsyncArchive(base_dirs[1], first(u).host)]
+    end
+    
+    throw(error("Unrecognised archive type or URI scheme $arch_type, $u"))
+end
+
+create_archives(u::URI; kwargs...) = create_archives([u]; kwargs...)
+
+decomp_option(::TarArchive{T}) where {T} = begin
+    @debug "Type parameter is" T
+    if T == Val(:TGZ) return "-z" end
+    if T == Val(:TBZ) return "-j" end
+    if T == Val(:TXZ) return "-J" end
+    return nothing
+end
+
+get_local_dir(a::BulkArchive) = a.local_cache
+
+struct LocalArchive <: AddressableArchive end
+
+struct RsyncArchive <: AddressableArchive
+    local_directory::AbstractString
+    original_host::String
+end
+
+# Getting an image from an archive
+
+download_images_os(a::ImageArchive, ext_info) = begin
+    @warn "No image download defined for $(typeof(a))"
+end
+
+download_images_os(a::TarArchive, ext_info) = begin
+
+    cmd_list = Cmd[]
+    loc = get_local_dir(a)
+    need_to_get = filter( x-> !has_local_version(a, x), ext_info; view=true)
+
+    @debug "For $ext_info need to get $need_to_get"
+    if size(need_to_get, 1) > 0
+        arch_paths = need_to_get.archive_path
+        push!(cmd_list, Cmd(`curl -s $(ext_info.full_uri[1])`,ignorestatus=true))
+        j = decomp_option(a)
+        if !isnothing(j)
+            push!(cmd_list, `tar -C $loc -x $j -f - --occurrence $arch_paths`)
+        else
+            push!(cmd_list, `tar -C $loc -x -f - --occurrence $arch_paths`)
+        end
+                  
+        @debug "Commands to extract" cmd_list
+        
+        try
+            run(pipeline(cmd_list...))
+        catch exc
+            @debug "Finished downloading" exc
+        end
+
+        # decompress if necessary
+
+        decompress_frames(a, need_to_get)
+
+        # verify
+
+        @debug "Expect files at" local_equivalent.(Ref(a), eachrow(ext_info))
+        @assert all( x-> ispath(local_equivalent(a, x)), eachrow(ext_info))
+    end
+
 end
 
 """
-    imgload(ext_info::DataFrame;local_copy = nothing, cached=cached)
+    download_images_os(a::RsyncArchive, ext_info)
 
-Return an image obtained by summing a series of images corresponding to the entries in `ext_info`.
-If local_copy is a file, it is used as the archive source instead of the requested
-URL.
+As rsync takes care of checking if the local version is equivalent,
+we do not need to keep track ourselves.
 """
-imgload(ext_info::DataFrame;local_copy = nothing, cached= Dict()) = begin
+download_images_os(a::RsyncArchive, ext_info) = begin
+    for r in eachrow(ext_info)
+        run(`rsync -avR $(r.uri) $(a.local_directory)`)
 
-    # Practical restrictions: only one uri and archive type
-
-    uri = unique(ext_info.full_uri)
-    if length(uri) > 1
-        throw(error("Multiple images must be at the same URI"))
+        #verify
+        @assert ispath(local_equivalent(a, r))
     end
 
-    uri = uri[]
-    arch_paths = "archive_path" in names(ext_info) ? ext_info.archive_path : nothing
+end
 
-    # Check cache
+download_images_os(a::LocalArchive, ext_info) = begin
+    for r in eachrow(ext_info)
+        @assert ispath(local_equivalent(a, r))
+    end
+end
 
-    not_in_cache = []
-    if !isnothing(arch_paths)
-        not_in_cache = filter( x-> !haskey(cached, ("$uri", x)) || cached[("$uri",x)] == "" , arch_paths)
+local_equivalent(a::CompressedArchive, ext_info) = begin
+    b = joinpath(a.local_cache, ext_info.archive_path)
+    if "file_compression" in names(ext_info)
+        return b * "_final"
+    end
+    return b
+end
+
+"""
+    local_equivalent(a::LocalArchive, ext_info)
+
+The local file name corresponding to the information provided in `ext_info`
+"""
+local_equivalent(a::LocalArchive, ext_info) = begin
+    base = ext_info.full_uri.path
+    if "file_compression" in names(ext_info)
+        return base * "_final"
     else
-        not_in_cache = !haskey(cached,("$uri",nothing))
+        return base
     end
+end
 
-    @debug "Not found in cache" not_in_cache uri
-    
-    if length(not_in_cache) > 0
+"""
+    local_equivalent(a::RsyncArchive, ext_info)
 
-        @debug "Not all requested files cached, downloading"
-        temp_locals = download_images_os(uri, ext_info, local_copy, arch_paths)
+The local file name corresponding to the information provided in `ext_info`.
+Note we use rsync -avR to preserve the directory hierarchy.
+"""
+local_equivalent(a::RsyncArchive, ext_info) = begin
+    base = joinpath(a.local_directory, ext_info.full_uri.path)
+    if "file_compression" in names(ext_info)
+        return base * "_final"
     else
-        @debug "Using cached files" arch_paths
-        if arch_paths == nothing
-            temp_locals = [cached[("$uri",nothing)]]
-        else
-            temp_locals = map(ap -> cached[("$uri", ap)], arch_paths)
-        end
+        return base
     end
+end
+
+has_local_version(a::CompressedArchive, ext_info) = begin
+    ispath(local_equivalent(a, ext_info))
+end
+
+#===== Image loading =====#
+"""
+    imgload(c::Block,array_ids, a::ImageArchive)
+
+Return the image referenced in CIF Block `c` corresponding to the specified raw array identifiers,
+using `ImageArchive` a
+"""
+imgload(c::CifContainer,bin_ids, a::ImageArchive) = begin
+
+    dl_info = external_specs_from_bin_ids(bin_ids,c)
+    imgload(a, dl_info)
+end
+
+"""
+    imgload(a::ImageArchive, ext_info::DataFrame)
+
+Return an image from `a` obtained by summing a series of images corresponding to the 
+entries in `ext_info`.
+"""
+imgload(a::ImageArchive, ext_info::DataFrame) = begin
+
+    download_images_os(a, ext_info)
+    temp_locals = local_equivalent.(Ref(a), eachrow(ext_info))
     
     # Now accumulate the image values
 
@@ -149,21 +367,34 @@ imgload(ext_info::DataFrame;local_copy = nothing, cached= Dict()) = begin
     return final_image
 end
 
-imgload(c::CifContainer,scan_id,frame_no::Int;kwargs...) = begin
-    bin_ids = bin_id_from_scan_frame(c,scan_id,frame_no)
-    imgload(c,bin_ids;kwargs...)
+imgload(c::CifContainer, scan_id, frame_no::Int, a::ImageArchive) = begin
+    bin_ids = bin_id_from_scan_frame(c, scan_id, frame_no)
+    imgload(c, bin_ids, a)
 end
 
 """
     imgload(c::CIF)
 
 Return the image referenced by the first encountered `_array_data.binary_id` in the
-first block of CIF file `c`.
+first block of CIF file `c`. To avoid re-downloading when multiple images are
+referenced, first create an archive using `create_archive(c)` and pass this as
+the second argument.
 """
 imgload(c::Cif) = begin
-    b = first(c).second
-    f_id = b["_array_data.binary_id"][1]
-    imgload(b,f_id)
+    cc = first(c).second
+    a = create_archives(cc)
+    imgload(cc, first(a))
+end
+
+"""
+    imgload(c::CifContainer, a::ImageArchive)
+
+Return the image referenced by the first encountered `_array_data.binary_id` in
+CIF block `c`. `a` is an archive created using `create_archive`.
+"""
+imgload(c::CifContainer, a::ImageArchive) = begin
+    f_id = c["_array_data.binary_id"][1]
+    imgload(c, f_id, a)
 end
 
 imgload(p::AbstractPath) = begin
@@ -173,7 +404,7 @@ end
 imgload(s::AbstractString) = begin
     imgload(Path(s))
 end
-
+     
 download_images_os(uri, ext_info, local_copy, arch_paths)  = begin
 
     # Use OS pipelines to download efficiently
@@ -368,6 +599,22 @@ decompress_frames(ext_info::DataFrame, loc, file_list) = begin
         end
         close(final_file)
         tl*"_final"
+    end
+end
+
+decompress_frames(a::ImageArchive, ext_info) = begin
+
+    if "file_compression" in names(ext_info)
+        fc = ext_info.file_compression
+        final_name = local_equivalent(a, ext_info)
+        compressed_name = local_equivalent(a, ext_info)[1:end-6]
+        final_file = open(final_name,"w")
+        if fc == "GZ"
+            run(pipeline(`zcat $compressed_name`,final_file))
+        elseif fc == "BZ2"
+            run(pipeline(`bzcat $compressed_name`,final_file))
+        end
+        close(final_file)
     end
 end
 

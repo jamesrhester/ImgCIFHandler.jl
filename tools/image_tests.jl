@@ -24,49 +24,10 @@ include("no_image_checks.jl")
 include("image_checks.jl")
 include("peak_check.jl")
 
-"""
-Information about cached files. If value is a
-directory, it is assumed to be the root directory
-when archive at URI is unpacked, otherwise it is
-the path to the local equivalent of the archive.
-"""
-const CachedLocation = Dict{String, String}
-
 is_archive(u) = begin
     long_ext = u[end-6:end]
     short_ext = u[end-2:end]
     long_ext in [".tar.gz", "tar.bz2"] || short_ext in ["tgz","zip"]
-end
-
-"""
-    download_uris(incif;subs=Dict)
-
-    Download uris from `incif` to local files, where `subs` contains
-    local file equivalents to urls {url => local file}
-"""
-download_uris(incif; subs=Dict())= begin
-
-    downloaded = CachedLocation()
-
-    # Get all referenced URIs
-    
-    urls = unique(incif["_array_data_external_data.uri"])
-
-    # If we have local substitutes, make sure they cover all uris found
-    
-    for u in urls
-        if u in keys(subs)
-            downloaded[u] = "$(abspath(subs[u]))"
-
-            @debug "Already have" downloaded[u]
-            
-            continue
-        end
-        loc = URI(make_absolute_uri(incif,u))
-        downloaded[u] = Downloads.download(loc)
-    end
-
-    return downloaded
 end
 
 """
@@ -188,34 +149,19 @@ end
 #   Utility routines
 
 """
-    Find an image ID that is obtainable. `archive_list` is
-    a dictionary of (URI, path) -> item pairs where `item` is an archive member
+    Find an image ID that is present locally
 
 """
-find_load_id(incif, archive_list) = begin
+find_load_id(incif, local_archive::ImageArchive) = begin
 
     external_info = get_loop(incif,"_array_data_external_data.id")
-    known_uris = incif["_array_data_external_data.uri"]
-    if haskey(incif,"_array_data_external_data.archive_path")
-        known_paths = incif["_array_data_external_data.archive_path"]
-    else
-        known_paths = []
-    end
 
-    archive_uris = [k[1] for k in keys(archive_list)]
-
-    # Find a matching frame
-
-    for pos in 1:length(known_uris)
-        if known_uris[pos] in archive_uris
-            official_path = length(known_paths) > 0 ? known_paths[pos] : ""
-            if haskey(archive_list, (known_uris[pos], official_path))
-                # a level of indirection
-                ext_data_id = incif["_array_data_external_data.id"][pos]
-                vv = incif["_array_data.external_data_id"]
-                pos = indexin([ext_data_id],vv)[]
-                return incif["_array_data.binary_id"][pos]
-            end
+    for ext_row in eachrow(external_info)
+        if has_local_version(local_archive, ext_row)
+            ext_data_id = getproperty(ext_row, "_array_data_external_data.id")
+            vv = incif["_array_data.external_data_id"]
+            pos = indexin([ext_data_id],vv)[]
+            return incif["_array_data.binary_id"][pos]
         end
     end
 
@@ -715,11 +661,9 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
     println("Testing presence of archive:")
 
-    if full
-        subs = download_uris(incif,subs = subs)
-    end
-    
-    all_archives = get_archive_member_name(incif;pick=pick,subs=subs)
+    local_archive = create_archive(incif, subs = subs)
+
+    all_archives = get_archive_member_name(incif, local_archive)
 
     print("\nTesting: All archives are accessible: ")
     
@@ -762,7 +706,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         
         imgfn = nothing
         if savepng
-            annotate_check_image(new_im,transp,rot,incif,scan_id=scan_id,frame_no=frame_no, peaks = peaks)
+            annotate_check_image(new_im,transp,rot,incif,scan_id=scan_id,frame_no=frame_no, peaks = peaks, hsize = 1024)
         else
             show_check_image(new_im,transp,rot)
         end
@@ -799,6 +743,25 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         end
     end
     return (ok,testimage)
+end
+
+read_peak_file(filename) = begin
+    lines = readlines(filename)
+    filter!(x -> length(x) > 0 && x[1] != '#', lines)
+    vals = []
+
+    for l in lines
+        append!(vals, split(l))
+    end
+
+    peaks = Peak[]
+    for v in 1:4:length(vals)
+        push!(peaks, Peak(String(vals[v]), parse(Int64,vals[v+1]),
+                          parse(Float64, vals[v+3]), parse(Float64, vals[v+2])
+                          )
+              )
+    end
+    return peaks
 end
 
 parse_cmdline(d) = begin
@@ -847,6 +810,9 @@ parse_cmdline(d) = begin
         action = "append_arg"
         help = "Coordinates of a peak to include in peak check. Implies --peaks. <fast> is the fast direction on the detector, typically horizontal. If only one scan, <scan> is
 ignored (but must be provided)."
+        "--peak-file"
+        nargs = 1
+        help = "Name of file containing peak information. Peaks information is given as scanid frameno fast slow. All values are whitespace separated. Lines beginning with `#` are ignored."
         "-s", "--sub"
         nargs = 2
         metavar = ["original","local"]
@@ -882,7 +848,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         subs[k] = abspath(expanduser(v))
     end
     
-    println("\n ImgCIF checker version 2022-11-24\n")
+    println("\n ImgCIF checker version 2023-02-03\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
@@ -899,13 +865,19 @@ if abspath(PROGRAM_FILE) == @__FILE__
     if length(parsed_args["peakval"])>0
         parsed_args["peaks"] = true
     end
+
+    # Get peaks
     
     peakvals = map(parsed_args["peakval"]) do p
         Peak(p[1], parse(Int64,p[2]) , parse(Float64, p[4]),
              parse(Float64, p[3]))
     end
+
+    if parsed_args["peak-file"] != []
+        append!(peakvals, read_peak_file(parsed_args["peak-file"][]))
+    end
     
-    if parsed_args["peaks"]
+    if parsed_args["peaks"] || parsed_args["peak-file"] != []
         parsed_args["output-png"] = true
         parsed_args["full-download"] = true
     end

@@ -11,10 +11,6 @@ const b4master_rem = joinpath(@__DIR__,"testfiles/b4_master_remote.cif")
 const b4master_arch = joinpath(@__DIR__,"testfiles/b4_master_archive.cif")
 const multi_scan = joinpath(@__DIR__,"testfiles/all_scans.cif")
 
-# Test our own imgCIF routines
-
-include("imgcif_tests.jl")
-
 extract_files() = begin
     clean_up() # in case we failed last time
     # Uncompress archive
@@ -32,18 +28,6 @@ clean_up() = begin
     rm(joinpath(@__DIR__,"testfiles/b4_mini.tar"),force=true)
 end
 
-@testset "Test HDF5 file loading" begin
-    q = joinpath(@__DIR__,"testfiles/simple3D.h5")
-    x = imgload(q,Val(:HDF5),path="/entry/data/test",frame=1)
-    @test size(x) == (4,3)
-end
-
-@testset "Test ADSC file loading" begin
-    q = joinpath(@__DIR__,"testfiles/tartaric_2_003.img")
-    x = imgload(q,Val(:SMV))
-    @test size(x) == (2048,2048)
-end
-
 @testset "Test variants of imgload" begin
     extract_files()
     x = imgload(b4master)
@@ -57,29 +41,46 @@ end
 end
 
 @testset "Test extraction from archive" begin
+    
     loc = unescapeuri(joinpath(@__DIR__,"testfiles/b4_mini.tar"))
-    dl_info = DataFrame(:uri=>"$(URI(scheme="file",path=loc))",
-                        :full_uri=>"$(URI(scheme="file",path=loc))",
+    dl_info = DataFrame(:uri=>URI(scheme="file",path=loc),
+                        :full_uri=>URI(scheme="file",path=loc),
                         :format=>"CBF",
                         :archive_format=>"TAR",
                         :archive_path=>"s01f0003.cbf")
-    x = imgload(dl_info)
+    a = create_archives(dl_info.full_uri[], arch_type = "TAR")
+    x = imgload(first(a), dl_info)
     @test size(x) == (4148,4362)
+    
     loc = unescapeuri(joinpath(@__DIR__,"testfiles/b4_mini.tar.bz2"))
     dl_info.archive_format=["TBZ"]
-    dl_info.uri=["$(URI(scheme="file",path=loc))"]
-    dl_info.full_uri=["$(URI(scheme="file",path=loc))"]
-    x = imgload(dl_info)
+    dl_info.uri=[URI(scheme="file",path=loc)]
+    dl_info.full_uri=[URI(scheme="file",path=loc)]
+    a = create_archives(dl_info.uri[], arch_type = "TBZ")
+    x = imgload(first(a), dl_info)
     @test size(x) == (4148,4362)
 end
 
 @testset "Test extraction of multiple images from archive" begin
     cf = first(Cif(Path(b4master_arch))).second
-    imgsum = imgload(cf,["1","2","3"])
+    a = first(create_archives(cf))
+    imgsum = imgload(cf,["1","2","3"],a)
     @test size(imgsum) == (4148,4362)
     # check that we have a sum
-    imgs = imgload.(Ref(cf),["1","2","3"])
+    imgs = imgload.(Ref(cf),["1","2","3"], Ref(a))
     @test imgs[1]+imgs[2]+imgs[3] == imgsum
+end
+
+@testset "Test HDF5 file loading" begin
+    q = joinpath(@__DIR__,"testfiles/simple3D.h5")
+    x = imgload(q,Val(:HDF5),path="/entry/data/test",frame=1)
+    @test size(x) == (4,3)
+end
+
+@testset "Test ADSC file loading" begin
+    q = joinpath(@__DIR__,"testfiles/tartaric_2_003.img")
+    x = imgload(q,Val(:SMV))
+    @test size(x) == (2048,2048)
 end
 
 @testset "Test axis getting and setting" begin
@@ -102,6 +103,10 @@ end
     tt = ImgCIFHandler.cbf_get_string_value(handle)
     @test tt == "$(p[twotheta])"
 end
+
+# Test our own imgCIF routines
+
+include("imgcif_tests.jl")
 
 clean_up()
 
