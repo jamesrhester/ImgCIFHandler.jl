@@ -54,8 +54,12 @@ export bin_id_from_scan_frame #Convert scan/frame_no into binary id
 export scan_frame_from_bin_id #Convert bin_id into scan/frame
 export peak_to_frames #Calculate all peak appearances
 export get_dependency_chain #Get the dependent axes of an axis
+
 export Peak
 export intensity, coords, frame, scan, dist #Working with peaks
+
+export ImageArchive
+export has_local_version #for ImageArchive types
 
 include("hdf_image.jl")
 include("cbf_image.jl")
@@ -129,6 +133,14 @@ create_archives(c::CifContainer; subs = Dict()) = begin
     
     dl_info = unique(c["$cat_name.uri"])
     test_uris = URI.(dl_info)
+
+    # catch relative URIs and make them absolute
+
+    my_dir = URI(scheme="file", path = "$(c.original_file)")
+    test_uris = map(x -> resolvereference(my_dir, x), test_uris)
+
+    @debug "URIs are" test_uris
+
     schemes = unique([ x.scheme for x in test_uris])
 
     # Check for sanity
@@ -146,7 +158,7 @@ create_archives(c::CifContainer; subs = Dict()) = begin
 
     # Per-frame URIs are special
     
-    if schemes in ["file", "rsync"]
+    if schemes in ["file", "rsync"] && !(arch_type in ("TBZ","TGZ","TXZ","TAR","ZIP"))
         test_uris = test_uris[1:1]
     end
         
@@ -159,7 +171,7 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict()) = begin
     arch_list = []
 
     uq_u = unique(u)
-    
+
     base_dirs = map(uq_u) do one_uri
         if one_uri in keys(subs)
             subs[one_uri]
@@ -252,8 +264,8 @@ download_images_os(a::TarArchive, ext_info) = begin
 
         # verify
 
-        @debug "Expect files at" local_equivalent.(Ref(a), eachrow(ext_info))
-        @assert all( x-> ispath(local_equivalent(a, x)), eachrow(ext_info))
+        @debug "Expect files at" local_equivalent.(Ref(a), eachrow(need_to_get))
+        @assert all( x-> has_local_version(a, x), eachrow(need_to_get))
     end
 
 end
@@ -265,8 +277,11 @@ As rsync takes care of checking if the local version is equivalent,
 we do not need to keep track ourselves.
 """
 download_images_os(a::RsyncArchive, ext_info) = begin
+
+    c = get_prefix(ext_info)
+
     for r in eachrow(ext_info)
-        run(`rsync -avR $(r.uri) $(a.local_directory)`)
+        run(`rsync -avR $(getproperty(r,"$(c)uri")) $(a.local_directory)`)
 
         #verify
         @assert ispath(local_equivalent(a, r))
@@ -280,11 +295,57 @@ download_images_os(a::LocalArchive, ext_info) = begin
     end
 end
 
+"""
+    get_prefix(ext_info)
+
+Return the category name prefix for ext_info
+"""
+get_prefix(ext_info) = begin
+    n = first(names(ext_info))
+    test_prefix = "_array_data_external_data."
+    if occursin(test_prefix, n)
+        return test_prefix
+    end
+
+    return ""
+end
+
+"""
+    check_match_uri
+
+Make sure the URL of the compressed archive matches the URL
+provided in `ext_info`
+"""
+check_match_uri(a::CompressedArchive, ext_info) = begin
+    
+    c = get_prefix(ext_info)
+    test_uri = URI(getproperty(ext_info, "$(c)uri"))
+
+    test_base = URI(scheme="file", path=pwd())
+    if resolvereference(test_base, test_uri) == test_uri
+        return test_uri == a.original_url
+    else
+        # is extremely unportable relative URL, don't try
+        return true
+    end
+end
+
 local_equivalent(a::CompressedArchive, ext_info) = begin
-    b = joinpath(a.local_cache, ext_info.archive_path)
+    
+    c = get_prefix(ext_info)
+
+    # Check that URIs match
+
+    if !check_match_uri(a, ext_info)
+        @debug "Non-matching URI" getproperty(ext_info, "$(c)uri") a.original_url
+        return nothing
+    end
+    
+    b = joinpath(a.local_cache, getproperty(ext_info, "$(c)archive_path"))
     if "file_compression" in names(ext_info)
         return b * "_final"
     end
+    @debug "Local equivalent:" ext_info b
     return b
 end
 
@@ -295,7 +356,8 @@ The local file name corresponding to the information provided in `ext_info`
 """
 local_equivalent(a::LocalArchive, ext_info) = begin
     base = ext_info.full_uri.path
-    if "file_compression" in names(ext_info)
+    c = get_prefix(ext_info)
+    if "$(c)file_compression" in names(ext_info)
         return base * "_final"
     else
         return base
@@ -310,15 +372,20 @@ Note we use rsync -avR to preserve the directory hierarchy.
 """
 local_equivalent(a::RsyncArchive, ext_info) = begin
     base = joinpath(a.local_directory, ext_info.full_uri.path)
-    if "file_compression" in names(ext_info)
+    c = get_prefix(ext_info)
+    if "$(c)file_compression" in names(ext_info)
         return base * "_final"
     else
         return base
     end
 end
 
-has_local_version(a::CompressedArchive, ext_info) = begin
-    ispath(local_equivalent(a, ext_info))
+has_local_version(a::ImageArchive, ext_info) = begin
+    l = local_equivalent(a, ext_info)
+    if isnothing(l)
+        return true
+    end
+    ispath(l)
 end
 
 #===== Image loading =====#
@@ -334,6 +401,18 @@ imgload(c::CifContainer,bin_ids, a::ImageArchive) = begin
     imgload(a, dl_info)
 end
 
+imgload(c::CifContainer, bin_ids, a::Vector{Any}) = begin
+
+    dl_info = external_specs_from_bin_ids(bin_ids, c)
+    for la in a
+        i = imgload(la, dl_info)
+        if !isnothing(i)
+            return i
+        end
+    end
+    
+end
+
 """
     imgload(a::ImageArchive, ext_info::DataFrame)
 
@@ -342,8 +421,13 @@ entries in `ext_info`.
 """
 imgload(a::ImageArchive, ext_info::DataFrame) = begin
 
-    download_images_os(a, ext_info)
     temp_locals = local_equivalent.(Ref(a), eachrow(ext_info))
+    if nothing in temp_locals
+        @debug "Archive not relevant" a ext_info
+        return nothing
+    end
+    
+    download_images_os(a, ext_info)
     
     # Now accumulate the image values
 
@@ -723,7 +807,127 @@ list_archive(u::URI;n=5,compressed=nothing) = begin
 end
 
 """
-    peek_image(URI,archive_type,cif_block::CifContainer;entry_no=0)
+    peek_image(a::ImageArchive, cif_block::CifContainer; entry_no=0, check_name=true)
+
+Find the name of an image in `a`, searching for `entry_no`, and
+check if this image is listed in `cif_block` if `check_name`
+is true.
+"""
+peek_image(a::LocalArchive, cif_block::CifContainer; entry_no=0, check_name=true) = begin
+
+    # For a local archive, some files are automatically present locally; all we need to do is
+    # find the first one in cif_block that matches a local file
+
+    catname = "_array_data_external_data"
+    if haskey(cif_block,"$catname.id")
+        for r in eachrow(get_loop(cif_block, "$catname.id"))
+            if has_local_version(a, r)
+                return local_equivalent(a, r)
+            end
+        end
+    end
+    
+end
+
+"""
+    peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true)
+
+Find the name of an image in `a`, searching for `entry_no`, and
+check if this image is listed in `cif_block` if `check_name`
+is true. If `extract` the image is also retrieved to the local
+cache.
+"""
+peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true) = begin
+
+    # For an Rsync archive, some files are automatically present
+    # locally; all we need to do is find the first one in cif_block
+    # that matches a local file
+
+    catname = "_array_data_external_data"
+    if haskey(cif_block,"$catname.id")
+        for r in eachrow(get_loop(cif_block, "$catname.id"))
+            if !has_local_version(a, r)
+                run(`rsync -avR $(r.uri) $(a.local_directory)`)
+            end
+            return local_equivalent(a, r)
+        end
+    end
+    
+end
+
+peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true) = begin
+
+    #TODO: detect already-present images
+
+    cmd_list = Cmd[]
+    uri = a.original_url
+    
+    push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
+    j = decomp_option(a)
+    if !isnothing(j)
+        push!(cmd_list, Cmd(`tar -t -v $j -f -`,ignorestatus=true))
+    else
+        push!(cmd_list, Cmd(`tar -t -v -f -`, ignorestatus=true))
+    end
+    
+    awkstr1 =  "\$3 > 0 { print \$NF }"
+    awkstr2 =  "\$3 > 0 && FNR >= $entry_no { exit }"
+    push!(cmd_list, `awk -e $awkstr1 -e $awkstr2`)
+
+    @debug "Peeking into $uri for $(typeof(a)) starting at $entry_no"
+    @debug "Command list is $cmd_list"
+    fname = nothing
+    try
+        fname = readchomp(pipeline(cmd_list...))
+    catch exc
+        @debug "Finished downloading" exc
+    end
+
+    # Just the last file is the one we want
+    fname = split(fname,"\n")[end]
+    
+    @debug fname
+
+    if fname != nothing && extract
+        pop!(cmd_list)    #no awk statement
+        if !isnothing(j)
+            cmd_list[2] = Cmd(`tar -C $(a.local_cache) -x -v $j -f - --occurrence $fname`)
+        else
+            cmd_list[2] = Cmd(`tar -C $(a.local_cache) -x -v -f - --occurrence $fname`)
+        end
+
+        @debug "Downloading" cmd_list
+        
+        try
+            run(pipeline(cmd_list...))
+        catch exc
+            @debug "Finished downloading" exc
+        end
+    end
+
+    if fname != nothing && check_name
+        c = "_array_data_external_data"
+        my_dir = URI(scheme="file", path = "$(cif_block.original_file)")
+        if haskey(cif_block,"$c.archive_path")
+            pos = indexin([fname],cif_block["$c.archive_path"])[]
+            if pos != nothing
+                ref_uri = resolvereference(my_dir, cif_block["$c.uri"][pos])
+                if ref_uri == uri
+                    return joinpath(a.local_cache,fname)
+                else
+                    @debug "Couldn't match $fname" uri ref_uri
+                end
+            end
+        end
+        return nothing
+    end
+
+    return joinpath(a.local_cache,fname)
+
+end
+
+"""
+    peek_image(URI,archive_type,cif_block::CifContainer;entry_no=0, check_name=true)
 
 Find the name of an image in archive of type `archive_type` at `URL`, searching
 from entry number `entry_no`,and check that this image is available in `cif_block`

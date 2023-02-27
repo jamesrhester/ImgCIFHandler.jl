@@ -3,7 +3,7 @@
 #  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
-Pkg.activate(@__DIR__) #uncomment for release version
+#Pkg.activate(@__DIR__) #uncomment for release version
 
 using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
@@ -31,112 +31,26 @@ is_archive(u) = begin
 end
 
 """
-    get_archive_member_name(incif;pick=1,subs=Dict())
+    get_archive_member_name(incif, local_archive:ImageArchive;pick=1)
 
-    For each distinct URI in `incif`, return the name of a member file that is listed
-    in `incif`. `subs` is a dict of local file equivalents to urls. `pick`
-    selects the nth member of the archive instead of the first.
+    Return a local equivalent for an entry in `incif`, using `local_archive`.
+
 """
-get_archive_member_name(incif;pick=1, subs=CachedLocation()) = begin
+get_archive_member_name(incif, local_archive::ImageArchive; pick=1) = begin
 
-    @debug "Looking for member in" subs
+    peek_image(a, incif)
     
-    # Get all referenced URIs
-    
-    urls = unique(incif["_array_data_external_data.uri"])
-
-    result_dict = Dict{Tuple{String,String},String}()
-
-    # Cycle through URIs, looking either for everything or one thing
-    
-    for u in urls
-
-        is_unpacked = false
-        
-        # Construct actual URI
-        
-        if haskey(subs,u)
-            loc = URI("file://"*subs[u])
-            @debug "Using $loc for $u" subs
-            is_unpacked = isdir(subs[u])
-        else
-            if !isempty(subs)
-                @warn "Warning: no substitute for $u"
-            end
-            loc = URI(make_absolute_uri(incif,u))
-        end
-
-        if !is_unpacked
-            
-            # Find archive type
-            
-            pos = indexin([u],incif["_array_data_external_data.uri"])[]
-            arch_type = nothing
-            if haskey(incif,"_array_data_external_data.archive_format")
-                arch_type = incif["_array_data_external_data.archive_format"][pos]
-            end
-
-            # Extract a single file if we have an archive
-            
-            x = ""
-            if arch_type in ("TBZ", "TGZ", "TAR", "TXZ")
-                try
-                    x = peek_image(loc,arch_type,incif,check_name=false,entry_no=pick)
-                catch exn
-                    @debug "Peeking into $u gave error:" exn
-                    continue
-                end
-                @debug "Got $x for $u"
-                result_dict[(u,x)] = "" 
-            elseif arch_type === nothing  #No unpacking possible eg HDF5/single frame
-                #TODO: actually check the file exists using http request
-                result_dict[(u,"")] = "$loc"
-            else
-                @warn "Partial downloading not available for $u: try full downloading with option -f"
-            end
-
-        else   #all unpacked already
-
-            for (root, dirs, files) in walkdir(subs[u])
-                if length(files) > 0
-                    root_rel = relpath(root, subs[u])
-
-                    # A tar archive will not use "." as the root
-                    
-                    if root_rel == "."
-                        root_rel = ""
-                    end
-
-                    @debug "Root path is" root_rel
-                    for f in files
-                        found = joinpath(root_rel, f)
-                        if found in incif["_array_data_external_data.archive_path"]
-                            result_dict[(u, found)] = joinpath(subs[u],found)
-                        end
-                    end
-                end
-            end
-            if length(result_dict) == 0
-                throw(error("Local directory $(subs[u]) contains no files"))
-            end
-        end
-    end
-
-    # result_dict links uri to a filename, which is contained in that uri
-
-    @debug "Final result" result_dict
-    
-    return result_dict     
 end
 
-test_archive_present(local_archives) = begin
-    
+test_archive_present(incif, local_archives) = begin
+
     messages = []
-    for ((k1, k2), v) in local_archives
-        if v == "" && isnothing(k2)
-            push!(messages, (false, "Unable to access $(k[1])"))
+    for la in local_archives
+        if peek_image(la, incif) == nothing
+            push!(messages, (false, "Unable to access $la"))
         end
     end
+
     return messages
     
 end
@@ -150,22 +64,23 @@ end
 
 """
     Find an image ID that is present locally
-
 """
-find_load_id(incif, local_archive::ImageArchive) = begin
+find_load_id(incif, local_archive) = begin
 
     external_info = get_loop(incif,"_array_data_external_data.id")
 
     for ext_row in eachrow(external_info)
-        if has_local_version(local_archive, ext_row)
-            ext_data_id = getproperty(ext_row, "_array_data_external_data.id")
-            vv = incif["_array_data.external_data_id"]
-            pos = indexin([ext_data_id],vv)[]
-            return incif["_array_data.binary_id"][pos]
+        for la in local_archive
+            if has_local_version(la, ext_row)
+                ext_data_id = getproperty(ext_row, "_array_data_external_data.id")
+                vv = incif["_array_data.external_data_id"]
+                pos = indexin([ext_data_id],vv)[]
+                return incif["_array_data.binary_id"][pos]
+            end
         end
     end
 
-    @error "No recognised frame files found" archive_list
+    @error "No recognised frame files found" local_archive
 end
 
 verdict(msg_list) = begin
@@ -661,24 +576,27 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
     println("Testing presence of archive:")
 
-    local_archive = create_archive(incif, subs = subs)
+    local_archive = create_archives(incif, subs = subs)
 
-    all_archives = get_archive_member_name(incif, local_archive)
+    @debug "Created local archive" local_archive
+
+    # get_archive_member_name(incif, local_archive)
 
     print("\nTesting: All archives are accessible: ")
     
-    ok = ok & verdict(test_archive_present(all_archives))
+    ok = ok & verdict(test_archive_present(incif, local_archive))
     
     # Test with an image
-    
+
+    testimage = [[]]
+
     if (ok && images) || always
-        testimage = [[]]
         println("\nRunning checks with downloaded images")
         println("="^40*"\n")
 
         # Choose image(s) to load
 
-        load_id = find_load_id(incif,all_archives)
+        load_id = find_load_id(incif,local_archive)
 
         if accum > 1
             load_ids = get_id_sequence(incif,load_id,accum)
@@ -687,7 +605,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         end
         
         try
-            testimage = imgload(incif,load_ids;local_version=subs, cached = all_archives)
+            testimage = imgload(incif, load_ids, local_archive)
         catch e
             @debug e
             verdict([(false,"Unable to access image $load_id: $e")])
@@ -701,7 +619,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
         # Output an image
         
-        new_im,transp,rot,peaks = create_check_image(incif,testimage,logscale=false, do_peaks = true)
+        new_im,transp,rot,peaks = create_check_image(incif,testimage,logscale=false, do_peaks = false)
         scan_id,frame_no = ImgCIFHandler.scan_frame_from_bin_id(load_id,incif)
         
         imgfn = nothing
