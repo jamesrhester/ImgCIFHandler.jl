@@ -51,6 +51,17 @@ it is extracted into directory `/home/me/downloads`, creating a directory
 `/home/me/downloads/crystal_1`, `<local>` is `/home/me/downloads`. Files and 
 directories not corresponding to entries in the imgCIF file will be ignored.
 
+For rsync archives, `<original_url>` should contain only the
+directories in the rsync URL that are unchanging for the whole
+dataset, without trailing forward slash. So, for example, if the
+remote URLs are of the form
+`rsync://data.sbgrid.org/10.15785/SBGRID/952/X4_<nnn>.cbf`, then
+`original_url` will be `rsync://data.sbgrid.org/10.15785/SBGRID/952`.
+
+Note also for rsync that an empty or non-existent directory can be provided as
+`<local>`, and it will be populated by rsync as images are accessed. This can
+then be reused on subsequent runs without needing to re-download images.
+
 ### Examples
 
 ```

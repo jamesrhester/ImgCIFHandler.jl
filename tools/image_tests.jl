@@ -766,7 +766,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         subs[k] = abspath(expanduser(v))
     end
     
-    println("\n ImgCIF checker version 2023-02-03\n")
+    println("\n ImgCIF checker version 2023-03-01\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end

@@ -60,6 +60,7 @@ export intensity, coords, frame, scan, dist #Working with peaks
 
 export ImageArchive
 export has_local_version #for ImageArchive types
+export get_constant_part #for RsyncArchive work
 
 include("hdf_image.jl")
 include("cbf_image.jl")
@@ -155,12 +156,6 @@ create_archives(c::CifContainer; subs = Dict()) = begin
     elseif !isnothing(arch_type)
         arch_type = arch_type[]
     end
-
-    # Per-frame URIs are special
-    
-    if schemes in ["file", "rsync"] && !(arch_type in ("TBZ","TGZ","TXZ","TAR","ZIP"))
-        test_uris = test_uris[1:1]
-    end
         
     create_archives(test_uris; arch_type = arch_type, subs = subs)
     
@@ -174,6 +169,7 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict()) = begin
 
     base_dirs = map(uq_u) do one_uri
         if one_uri in keys(subs)
+            @debug "Found local sub" subs[one_uri]
             subs[one_uri]
         else
             mktempdir()
@@ -202,7 +198,16 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict()) = begin
     end
 
     if first(u).scheme == "rsync"
-        return [RsyncArchive(base_dirs[1], first(u).host)]
+        const_part = "$(get_constant_part(u))"
+        if const_part in keys(subs)
+            @debug "Found local sub:" subs[const_part]
+            base_dir = subs[const_part]
+        else
+            @debug "$const_part not in subs list" keys(subs)
+            base_dir = base_dirs[1]
+        end
+        
+        return [RsyncArchive(base_dir, u)]
     end
     
     throw(error("Unrecognised archive type or URI scheme $arch_type, $u"))
@@ -222,10 +227,24 @@ get_local_dir(a::BulkArchive) = a.local_cache
 
 struct LocalArchive <: AddressableArchive end
 
+"""
+An RsyncArchive corresponds to a dataset for which each
+frame is addressable through a unique rsync: URL. 
+`original_url` in this case corresponds to the longest
+unique part of the URL, and this is replaced by
+`local_directory` in the local filesystem.
+"""
 struct RsyncArchive <: AddressableArchive
     local_directory::AbstractString
-    original_host::String
+    original_url::URI
 end
+
+RsyncArchive(local_dir, all_urls::Vector{URI}) = begin
+
+    RsyncArchive(local_dir, get_constant_part(all_urls))
+        
+end
+
 
 # Getting an image from an archive
 
@@ -280,8 +299,19 @@ download_images_os(a::RsyncArchive, ext_info) = begin
 
     c = get_prefix(ext_info)
 
+    # SBGRID does not download the full directory hierarchy
+    # from the URL, therefore we insert a "." so that we can
+    # control it
+
+    aurl = "$(a.original_url)"
     for r in eachrow(ext_info)
-        run(`rsync -avR $(getproperty(r,"$(c)uri")) $(a.local_directory)`)
+        full_uri = getproperty(r,"$(c)uri")
+        if !startswith(full_uri, aurl)
+            throw(error("Asked to download from $full_uri but archive is for $aurl"))
+        end
+        download_uri = joinpath(aurl,".",full_uri[(length(aurl)+2):end])
+        @debug "Rsync download address" download_uri
+        run(`rsync -avR $download_uri $(a.local_directory)`)
 
         #verify
         @assert ispath(local_equivalent(a, r))
@@ -330,6 +360,35 @@ check_match_uri(a::CompressedArchive, ext_info) = begin
     end
 end
 
+"""
+    get_constant_part(v::Vector{URI})
+
+Return a URI formed from the constant part of the URIs listed in v
+"""
+get_constant_part(v::Vector{URI}) = begin
+    
+    # find unchanging portion of path
+
+    new_path = v[1].path
+    
+    path_elements = map(x -> splitpath(x.path), v)
+    for pe in 1:length(path_elements[1])
+        all_entries = [x[pe] for x in path_elements]
+        if length(unique(all_entries)) == 1
+            continue
+        else
+            new_path = joinpath(splitpath(v[1].path)[1:pe-1])
+        end
+    end
+
+    b = v[1]
+    URI(scheme="rsync", host = b.host,
+        path = new_path, fragment = b.fragment,
+        port = b.port, query = b.query,
+        userinfo = b.userinfo)
+
+end
+
 local_equivalent(a::CompressedArchive, ext_info) = begin
     
     c = get_prefix(ext_info)
@@ -371,8 +430,12 @@ The local file name corresponding to the information provided in `ext_info`.
 Note we use rsync -avR to preserve the directory hierarchy.
 """
 local_equivalent(a::RsyncArchive, ext_info) = begin
-    base = joinpath(a.local_directory, ext_info.full_uri.path)
+
     c = get_prefix(ext_info)
+    u = URI(getproperty(ext_info,"$(c)uri"))
+    base_part = "$(a.original_url)"
+    unique_part = "$u"[length(base_part)+2:end]
+    base = joinpath(a.local_directory, unique_part)
     if "$(c)file_compression" in names(ext_info)
         return base * "_final"
     else
@@ -401,7 +464,7 @@ imgload(c::CifContainer,bin_ids, a::ImageArchive) = begin
     imgload(a, dl_info)
 end
 
-imgload(c::CifContainer, bin_ids, a::Vector{Any}) = begin
+imgload(c::CifContainer, bin_ids, a::Vector) = begin
 
     dl_info = external_specs_from_bin_ids(bin_ids, c)
     for la in a
@@ -843,14 +906,14 @@ peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true
     # locally; all we need to do is find the first one in cif_block
     # that matches a local file
 
-    catname = "_array_data_external_data"
-    if haskey(cif_block,"$catname.id")
-        for r in eachrow(get_loop(cif_block, "$catname.id"))
-            if !has_local_version(a, r)
-                run(`rsync -avR $(r.uri) $(a.local_directory)`)
-            end
-            return local_equivalent(a, r)
+    c = "_array_data_external_data"
+    if haskey(cif_block,"$c.id")
+        r = first(get_loop(cif_block, "$c.id"))
+        if !has_local_version(a, r)
+            rscmd = Cmd(`rsync -avR $(getproperty(r,"$c.uri")) $(a.local_directory)`)
+            @debug "Obtaining file..." rscmd
         end
+        return local_equivalent(a, r)
     end
     
 end
