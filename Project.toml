@@ -1,7 +1,7 @@
 name = "ImgCIFHandler"
 uuid = "c7e9ad6d-41c4-4c87-9c27-841f8c354b7f"
 author = "James Hester"
-version = "0.10.2"
+version = "0.11.0"
 
 [deps]
 CBFlib_small_jll = "9b99e207-4e38-5950-946f-a3f2976e367a"
