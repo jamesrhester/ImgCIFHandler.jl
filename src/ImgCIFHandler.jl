@@ -293,7 +293,8 @@ end
     download_images_os(a::RsyncArchive, ext_info)
 
 As rsync takes care of checking if the local version is equivalent,
-we do not need to keep track ourselves.
+we do not need to keep track ourselves. But we do to save rsync
+calls.
 """
 download_images_os(a::RsyncArchive, ext_info) = begin
 
@@ -489,8 +490,10 @@ imgload(a::ImageArchive, ext_info::DataFrame) = begin
         @debug "Archive not relevant" a ext_info
         return nothing
     end
-    
-    download_images_os(a, ext_info)
+
+    if !all(x -> has_local_version(a, x), eachrow(ext_info))
+        download_images_os(a, ext_info)
+    end
     
     # Now accumulate the image values
 

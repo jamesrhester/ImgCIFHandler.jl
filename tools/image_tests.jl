@@ -3,7 +3,7 @@
 #  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
-#Pkg.activate(@__DIR__) #uncomment for release version
+Pkg.activate(@__DIR__) #uncomment for release version
 
 using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
@@ -642,13 +642,9 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
             # Don't do it unless we have local files
 
-            if length(all_archives) == 0
-                @error "Peak checking requires local unpacked archives"
-            else
-                predicted = accumulate_peaks(incif, peakvals=peakvals, local_version=subs, cached=all_archives)
-                @debug "Predicted peaks" predicted
-                create_peak_image(incif,predicted,local_version=subs, cached=all_archives)
-            end
+            predicted = accumulate_peaks(incif, peakvals=peakvals, cached=local_archive)
+            @debug "Predicted peaks" predicted
+            create_peak_image(incif, predicted, cached=local_archive)
         end
     end
     
@@ -657,7 +653,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
     if full
         for (desc,one_test) in test_full_list
             print("\nTesting full archive: $desc:")
-            ok = ok & verdict(one_test(incif,all_archives))
+            ok = ok & verdict(one_test(incif, local_archive))
         end
     end
     return (ok,testimage)
@@ -794,6 +790,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
     if parsed_args["peak-file"] != []
         append!(peakvals, read_peak_file(parsed_args["peak-file"][]))
     end
+
+    @debug "Peaks" peakvals
     
     if parsed_args["peaks"] || parsed_args["peak-file"] != []
         parsed_args["output-png"] = true

@@ -1,17 +1,15 @@
 # Routines for checking peak locations
 """
-    accumulate_peaks(incif; peakvals = [], maxframes=10, maxpeaks=10, local_version = Dict(), cached = Dict())
+    accumulate_peaks(incif; peakvals = [], maxframes=10, maxpeaks=10, cached = Vector{ImageArchive})
 
-Work through up to `maxframes` images from incif until
-up to `maxpeaks` peaks have been found that have predicted
-positions in at least one of the other frames. Use `local_version`
-and `cached` as a source for images. If `peakvals` is not empty,
-use those as a source of peaks. Each entry in `peakvals` is
-of the form `scan, frameno, fast, slow` .
-"""
-accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes = 10, maxpeaks = 10, local_version = Dict(), cached = Dict()) = begin
+Work through up to `maxframes` images from incif until up to
+`maxpeaks` peaks have been found that have predicted positions in at
+least one of the other frames. Use `cached` as a source for images. If
+`peakvals` is not empty, use those as a source of peaks. Each entry in
+`peakvals` is of the form `scan, frameno, fast, slow` .  """
+accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes =
+10, maxpeaks = 10, cached = Vector{ImageArchive}) = begin
 
-    
     good_peaks = Vector{Peak}[]
 
     if length(peakvals) == 0
@@ -40,7 +38,7 @@ accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes = 10, maxpea
         
         for fi in 1:no_frames
 
-            full_img = imgload(incif, frame_ids[fi], local_version=local_version, cached = cached)
+            full_img = imgload(incif, frame_ids[fi], cached)
             apply_mask!(incif, full_img)
             peaks = Peak.(scan_id, fi, find_peaks(full_img))
             for p in peaks
@@ -59,7 +57,6 @@ accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes = 10, maxpea
             # Refine target frame
             
             _, new_p = create_peak_area(incif, p;skip=1, range=5,
-                                                local_version = local_version,
                                                 cached = cached)
             
             @debug "Old, new peaks:" p new_p
@@ -159,7 +156,7 @@ create_peak_image(incif,predicted::Vector{Vector{Peak}};redo=true, skip=1,range=
     display_peak_table(all_images,"$(incif.original_file)"*"_peaks"*".png")
 end
 
-create_peak_area(incif,p::Peak;skip=1,range=5,window=10, local_version=Dict(), cached=Dict()) = begin
+create_peak_area(incif,p::Peak;skip=1,range=5,window=10, cached = Vector{ImageArchive}) = begin
 
     # find out our maximum frame number
 
@@ -189,7 +186,7 @@ create_peak_area(incif,p::Peak;skip=1,range=5,window=10, local_version=Dict(), c
     slow, fast = coords(p)
     slow = Int(round(slow))
     fast = Int(round(fast))
-    full_img = imgload(incif, frame_ids[1], local_version=local_version, cached = cached)
+    full_img = imgload(incif, frame_ids[1], cached)
     fast_m, slow_m = size(full_img)
 
     # accumulate all the peaks
@@ -201,7 +198,7 @@ create_peak_area(incif,p::Peak;skip=1,range=5,window=10, local_version=Dict(), c
     acc_img = zeros(corners[4]-corners[2]+1, corners[3]-corners[1]+1)
     
     for fid in frame_ids
-        full_img = imgload(incif, fid, local_version=local_version, cached = cached)
+        full_img = imgload(incif, fid, cached)
 
     # Window down and remove negative values
 
