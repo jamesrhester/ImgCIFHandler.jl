@@ -39,7 +39,7 @@ Note that this command will only work if the images referred to in `b4_master.ci
 
 # Supported external formats
 
-This release supports `HDF5`, `CBF`, and `SMV` (ADSC) formats, as well as Tar archives (optionally compressed using Bzip2 or Gzip) or 
+This release supports `HDF5`, `CBF`, and `SMV` (ADSC) formats, as well as Tar archives (optionally compressed using Bzip2, Gzip or Xzip) or 
 Zip archives containing files in those formats. In all cases the format stated by the imgCIF file is used.
 
 # Contributions
