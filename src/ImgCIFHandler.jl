@@ -415,12 +415,12 @@ end
 The local file name corresponding to the information provided in `ext_info`
 """
 local_equivalent(a::LocalArchive, ext_info) = begin
-    base = ext_info.full_uri.path
     c = get_prefix(ext_info)
+    base_part = URI(getproperty(ext_info,"$(c)uri")).path
     if "$(c)file_compression" in names(ext_info)
-        return base * "_final"
+        return base_part * "_final"
     else
-        return base
+        return base_part
     end
 end
 
@@ -449,6 +449,7 @@ has_local_version(a::ImageArchive, ext_info) = begin
     if isnothing(l)
         return true
     end
+    @debug "Local path is" l
     ispath(l)
 end
 
