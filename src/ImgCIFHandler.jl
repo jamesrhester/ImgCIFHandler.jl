@@ -22,6 +22,7 @@ module ImgCIFHandler
 using CrystalInfoFramework
 using FilePaths
 using DataFrames
+using InvertedIndices
 import Tar
 using CodecBzip2
 using CodecZlib

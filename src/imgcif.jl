@@ -686,9 +686,11 @@ external_specs_from_bin_ids(bin_ids::Vector,c) = begin
     ext_loop = get_loop(c,"$ext_cat.id")
     info = filter(row -> row["$ext_cat.id"] in ext_ids, ext_loop)
 
-    rename!(x-> replace(x,"$ext_cat." => ""),info)
+    # rename!(x-> replace(x,"$ext_cat." => ""),info)
 
-    transform!(info, "uri" => (x->make_absolute_uri.(Ref(c),x)) => :full_uri)
+    transform!(info, "$ext_cat.uri" => (x->make_absolute_uri.(Ref(c),x)) => :full_uri)
+    select!(info, Not("$ext_cat.uri"))
+    rename!(info, :full_uri => "$ext_cat.uri")
     
     @debug "Images for $bin_ids: $info"
 
