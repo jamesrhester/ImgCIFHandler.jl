@@ -158,11 +158,11 @@ create_archives(c::CifContainer; subs = Dict()) = begin
         arch_type = arch_type[]
     end
         
-    create_archives(test_uris; arch_type = arch_type, subs = subs)
+    create_archives(test_uris; arch_type = arch_type, subs = subs, root_dir = "$(dirname(c.original_file))")
     
 end
 
-create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict()) = begin
+create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="") = begin
 
     arch_list = []
 
@@ -195,7 +195,7 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict()) = begin
     # the types above. Do not mix schemes.
 
     if first(u).scheme == "file" || first(u).scheme == ""
-        return [LocalArchive()]
+        return [LocalArchive(root_dir)]
     end
 
     if first(u).scheme == "rsync"
@@ -226,7 +226,9 @@ end
 
 get_local_dir(a::BulkArchive) = a.local_cache
 
-struct LocalArchive <: AddressableArchive end
+struct LocalArchive <: AddressableArchive
+    root_dir::String    #For relative URIs
+end
 
 """
 An RsyncArchive corresponds to a dataset for which each
@@ -262,7 +264,7 @@ download_images_os(a::TarArchive, ext_info) = begin
     @debug "For $ext_info need to get $need_to_get"
     if size(need_to_get, 1) > 0
         arch_paths = need_to_get.archive_path
-        push!(cmd_list, Cmd(`curl -s $(ext_info.full_uri[1])`,ignorestatus=true))
+        push!(cmd_list, Cmd(`curl -s $(ext_info.uri[1])`,ignorestatus=true))
         j = decomp_option(a)
         if !isnothing(j)
             push!(cmd_list, `tar -C $loc -x $j -f - --occurrence $arch_paths`)
@@ -418,6 +420,9 @@ The local file name corresponding to the information provided in `ext_info`
 local_equivalent(a::LocalArchive, ext_info) = begin
     c = get_prefix(ext_info)
     base_part = URI(getproperty(ext_info,"$(c)uri")).path
+    if !isabspath(base_part)
+        base_part = joinpath(a.root_dir, base_part)
+    end
     if "$(c)file_compression" in names(ext_info)
         return base_part * "_final"
     else
@@ -487,6 +492,10 @@ entries in `ext_info`.
 """
 imgload(a::ImageArchive, ext_info::DataFrame) = begin
 
+    # Fix any leftover long column names
+
+    rename!(x-> replace(x,"_array_data_external_data." => ""),ext_info)
+    
     temp_locals = local_equivalent.(Ref(a), eachrow(ext_info))
     if nothing in temp_locals
         @debug "Archive not relevant" a ext_info

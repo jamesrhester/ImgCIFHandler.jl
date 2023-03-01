@@ -44,18 +44,16 @@ end
     
     loc = unescapeuri(joinpath(@__DIR__,"testfiles/b4_mini.tar"))
     dl_info = DataFrame(:uri=>URI(scheme="file",path=loc),
-                        :full_uri=>URI(scheme="file",path=loc),
                         :format=>"CBF",
                         :archive_format=>"TAR",
                         :archive_path=>"s01f0003.cbf")
-    a = create_archives(dl_info.full_uri[], arch_type = "TAR")
+    a = create_archives(dl_info.uri[], arch_type = "TAR")
     x = imgload(first(a), dl_info)
     @test size(x) == (4148,4362)
     
     loc = unescapeuri(joinpath(@__DIR__,"testfiles/b4_mini.tar.bz2"))
     dl_info.archive_format=["TBZ"]
     dl_info.uri=[URI(scheme="file",path=loc)]
-    dl_info.full_uri=[URI(scheme="file",path=loc)]
     a = create_archives(dl_info.uri[], arch_type = "TBZ")
     x = imgload(first(a), dl_info)
     @test size(x) == (4148,4362)
