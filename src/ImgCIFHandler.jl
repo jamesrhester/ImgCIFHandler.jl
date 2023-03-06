@@ -47,6 +47,7 @@ export get_detector_axis_settings #Get axis settings for particular frame
 export get_beam_centre
 export get_gonio_axes
 export get_pixel_coordinates
+export get_detector_distance   #Get distance of flat detector from crystal
 export get_surface_axes #get the axes used to locate pixels on the detector
 export get_id_sequence #get a list of sequential binary ids from the same scan
 export get_axis_vector #get the vector for an axis_id
@@ -924,8 +925,12 @@ peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true
     if haskey(cif_block,"$c.id")
         r = first(get_loop(cif_block, "$c.id"))
         if !has_local_version(a, r)
-            rscmd = Cmd(`rsync -avR $(getproperty(r,"$c.uri")) $(a.local_directory)`)
+            aurl = "$(a.original_url)"
+            full_uri = getproperty(r, "$(c).uri")
+            download_uri = joinpath(aurl, ".", full_uri[(length(aurl)+2):end])
+            rscmd = Cmd(`rsync -avR $download_uri $(a.local_directory)`)
             @debug "Obtaining file..." rscmd
+            run(rscmd)
         end
         return local_equivalent(a, r)
     end

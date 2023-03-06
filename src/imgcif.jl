@@ -561,6 +561,19 @@ get_pixel_normal(incif::CifContainer, slow, fast, scan_id, frame_no) = begin
 end
 
 """
+    get_detector_distance(incif::CifContainer, scanid)
+
+Return the detector distance for `scanid`
+"""
+get_detector_distance(incif::CifContainer, scanid) = begin
+
+    normdir = get_detector_normal(incif, scanid, 1)
+    coords = get_pixel_coordinates(incif, 0, 0, scanid, 1)
+    return abs(dot(coords, normdir))
+    
+end
+
+"""
     scan_frame_from_img_name(u,name,cif_block)
 
 Return the scan_id, frame_id for the given `name` at URL `u` according to contents
