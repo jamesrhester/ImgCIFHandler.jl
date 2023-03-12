@@ -311,7 +311,7 @@ download_images_os(a::RsyncArchive, ext_info) = begin
     aurl = "$(a.original_url)"
     for r in eachrow(ext_info)
         full_uri = getproperty(r,"$(c)uri")
-        if !startswith(full_uri, aurl)
+        if !startswith("$full_uri", aurl)
             throw(error("Asked to download from $full_uri but archive is for $aurl"))
         end
         download_uri = joinpath(aurl,".",full_uri[(length(aurl)+2):end])

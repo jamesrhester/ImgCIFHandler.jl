@@ -45,7 +45,7 @@ read_adsc_header(loc) = begin
     if haskey(header,"bitmapsize")
         header["bitmapsize"] = parse(UInt32,header["bitmapsize"])
     end
-    println("Expect header length $(header["header_bytes"]), image length $(header["size1"]*header["size2"]*2)")
+    @debug "Header, image info" header["header_bytes"] (header["size1"]*header["size2"]*2)
     return header
 end
 

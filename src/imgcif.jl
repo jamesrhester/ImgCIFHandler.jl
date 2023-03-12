@@ -937,11 +937,11 @@ find_peaks(im; mindist=10) = begin
 end
 
 """
-    peak_to_frames(p::Peak, cc::CifContainer;single=false)
+    peak_to_frames(p::Peak, cc::CifContainer;single=false, friedel=true)
 
 Given peak `p`, return an array of peaks that the pixel should appear,
 if at all. If only peaks from the same scan should be checked,
-`single` should be true.  
+`single` should be true.
 """
 peak_to_frames(p::Peak, cc;single=false) = begin
 
@@ -964,72 +964,76 @@ peak_to_frames(p::Peak, cc;single=false) = begin
     scan_id = scan(p)
     frame_no = frame(p) + 0.5
     recip_coords = get_recip_point(cc, slow, fast, scan_id, frame_no)
+    friedel_coords = -1.0 * recip_coords
 
     # Loop over scans looking for intersections
 
     found_list = Peak[]
     all_scans = single ? [scan_id] : cc["_diffrn_scan.id"]
-    for one_scan in all_scans
+    for rp in (recip_coords, friedel_coords)
+        for one_scan in all_scans
 
-        # Get number of frames for later
+            # Get number of frames for later
 
-        scan_ind = indexin([one_scan],cc["_diffrn_scan.id"])[]
-        no_frames = parse(Int64,cc["_diffrn_scan.frames"][scan_ind])
-        
-        # Get reciprocal coordinates at start of scan
-        
-        begin_pt = get_scan_start(cc,recip_coords,one_scan)
+            scan_ind = indexin([one_scan],cc["_diffrn_scan.id"])[]
+            no_frames = parse(Int64,cc["_diffrn_scan.frames"][scan_ind])
+            
+            # Get reciprocal coordinates at start of scan
+            
+            begin_pt = get_scan_start(cc,rp,one_scan)
 
-        @debug "At zero scan axis:" rotate_gonio(cc,recip_coords,one_scan)
+            @debug "At zero scan axis:" rotate_gonio(cc,rp,one_scan)
 
-        @debug "Reference, start of scan" recip_coords begin_pt
+            @debug "Reference, start of scan" rp begin_pt
 
-        # Calculate rotation to intersection
-        
-        scan_axis,scan_begin,finish, incr = get_scan_axis(cc,one_scan)
-        rot_vec = get_axis_vector(cc,scan_axis,one_scan,frame_no)
-        hits = ewald_intersect(lambda,rot_vec,begin_pt)
+            # Calculate rotation to intersection
+            
+            scan_axis,scan_begin,finish, incr = get_scan_axis(cc,one_scan)
+            rot_vec = get_axis_vector(cc,scan_axis,one_scan,frame_no)
+            hits = ewald_intersect(lambda,rot_vec,begin_pt)
 
-        if hits === nothing
+            if hits === nothing
 
-            @debug "No intersections for $one_scan"
-            continue
+                @debug "No intersections for $one_scan"
+                continue
 
-        end
-
-        rot_ang = rot_angle.(Ref(begin_pt),hits,Ref(rot_vec))
-
-        # Check if we need to rotate in the opposite direction
-        
-        fn = map(rot_ang) do x
-            if sign(x)==sign(incr) || isapprox(x,0,atol=0.01)
-                1 + x/incr
-            else
-                1 + sign(incr)*(360 - abs(x))/incr
             end
-        end
 
-        @debug "Intersections for $pixel_coords in $one_scan" rot_ang fn
+            rot_ang = rot_angle.(Ref(begin_pt),hits,Ref(rot_vec))
 
-        # Determine which ones we will see
-        
-        for (h,n,r) in zip(hits,fn,rot_ang)
-            if n <= no_frames
-                x,y = get_detector_coords(cc,one_scan,n,h)
-
-                @debug "Det coords" x y
-                if x > 0 && y > 0 && x <= slow_num && y <= fast_num
-                    @debug "Found!"
-                    push!(found_list,Peak(one_scan,n,x,y, intensity(p)))
+            # Check if we need to rotate in the opposite direction
+            
+            fn = map(rot_ang) do x
+                if sign(x)==sign(incr) || isapprox(x,0,atol=0.01)
+                    1 + x/incr
+                else
+                    1 + sign(incr)*(360 - abs(x))/incr
                 end
-            else
-                @debug "Rejecting, frame no $n > $no_frames"
+            end
+
+            @debug "Intersections for $pixel_coords in $one_scan" rot_ang fn
+
+            # Determine which ones we will see
+            
+            for (h,n,r) in zip(hits,fn,rot_ang)
+                if n <= no_frames
+                    x,y = get_detector_coords(cc,one_scan,n,h)
+
+                    @debug "Det coords" x y
+                    if x > 0 && y > 0 && x <= slow_num && y <= fast_num
+                        @debug "Found!"
+                        push!(found_list,Peak(one_scan,n,x,y, intensity(p)))
+                    end
+                else
+                    @debug "Rejecting, frame no $n > $no_frames"
+                end
             end
         end
+
     end
 
     @debug "Found: $found_list" pixel_coords scan_id frame_no
-    
+
     return found_list
 end
 
