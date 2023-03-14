@@ -42,6 +42,7 @@ using Rotations
 export create_archives  #register an archive
 export imgload         #Load raw data
 export peek_image      #Find first image in archive
+export ping_archive    #Check that URL exists
 export make_absolute_uri #Use Cif block contents to make absolute URI
 export get_detector_axis_settings #Get axis settings for particular frame
 export get_beam_centre
@@ -119,6 +120,17 @@ struct ZipArchive <: CompressedArchive
     original_url::URI
 end
 
+struct HDFArchive <: BulkArchive
+    local_cache::AbstractString
+    original_url::URI
+end
+
+HDFArchive(local_dir, all_urls::Vector{URI}) = begin
+
+    HDFArchive(local_dir, get_constant_part(all_urls))
+        
+end
+
 create_archives(c::Cif; kwargs...) = create_archive(first(c).second; kwargs...)
 
 """
@@ -133,6 +145,9 @@ create_archives(c::CifContainer; subs = Dict()) = begin
 
     cat_name = "_array_data_external_data"
     arch_type = haskey(c, "$cat_name.archive_format") ? unique(c["$cat_name.archive_format"]) : nothing
+    if arch_type === nothing
+        arch_type = unique(c["$cat_name.format"])
+    end
     
     dl_info = unique(c["$cat_name.uri"])
     test_uris = URI.(dl_info)
@@ -185,6 +200,20 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
         return arch_list
     end
 
+    if arch_type == "HDF5"
+        const_part = "$(get_constant_part(u))"
+        if const_part in keys(subs)
+            @debug "Found local sub:" subs[const_part]
+            base_dir = subs[const_part]
+        else
+            @debug "$const_part not in subs list" keys(subs)
+            base_dir = base_dirs[1]
+        end
+
+        return [HDFArchive(base_dir, u)]
+    
+    end
+    
     if arch_type == "ZIP"
         for (one_uri, bd) in zip(uq_u, base_dirs)
             push!(arch_list, ZipArchive(bd, one_uri))
@@ -248,7 +277,6 @@ RsyncArchive(local_dir, all_urls::Vector{URI}) = begin
     RsyncArchive(local_dir, get_constant_part(all_urls))
         
 end
-
 
 # Getting an image from an archive
 
@@ -387,7 +415,7 @@ get_constant_part(v::Vector{URI}) = begin
     end
 
     b = v[1]
-    URI(scheme="rsync", host = b.host,
+    URI(scheme=b.scheme, host = b.host,
         path = new_path, fragment = b.fragment,
         port = b.port, query = b.query,
         userinfo = b.userinfo)
@@ -449,6 +477,15 @@ local_equivalent(a::RsyncArchive, ext_info) = begin
     else
         return base
     end
+end
+
+local_equivalent(a::HDFArchive, ext_info) = begin
+
+    c = get_prefix(ext_info)
+    u = URI(getproperty(ext_info,"$(c)uri"))
+    base_part = "$(a.original_url)"
+    unique_part = "$u"[length(base_part)+2:end]
+    base = joinpath(a.local_cache, unique_part)
 end
 
 has_local_version(a::ImageArchive, ext_info) = begin
@@ -566,186 +603,6 @@ end
 imgload(s::AbstractString) = begin
     imgload(Path(s))
 end
-     
-download_images_os(uri, ext_info, local_copy, arch_paths)  = begin
-
-    # Use OS pipelines to download efficiently
-
-    arch_type = "archive_format" in names(ext_info) ? ext_info.archive_format[1] : nothing
-
-    cmd_list = Cmd[]
-    loc = mktempdir()
-    decomp_option = "-v"
-
-    if arch_type == "TGZ" decomp_option = "-z" end
-    if arch_type == "TBZ" decomp_option = "-j" end
-    if arch_type == "TXZ" decomp_option = "-J" end
-    if arch_type in ("TGZ","TBZ","TAR","TXZ")
-        if local_copy == nothing
-            push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
-        else
-            push!(cmd_list, `cat $local_copy`)
-        end
-        push!(cmd_list, `tar -C $loc -x $decomp_option -f - --occurrence $arch_paths`)
-        temp_locals = joinpath.(Ref(loc),arch_paths)
-    else
-        if local_copy == nothing
-            temp_locals = [joinpath(loc,"temp_download")]
-            push!(cmd_list, `curl $uri -o $(temp_locals[1])`)
-        else
-            temp_locals = [local_copy]
-        end
-    end
-    @debug "Command list" cmd_list
-    if length(cmd_list) > 0
-        try
-            run(pipeline(cmd_list...))
-        catch exc
-            @debug "Finished downloading" exc
-        end
-    end
-
-    # Now the final files are listed in $temp_locals
-
-    if arch_type == "ZIP"   #has been downloaded to local storage
-        run(`unzip $(temp_locals[1]) $arch_paths -d $loc`)
-        temp_locals = joinpath.(Ref(loc),arch_paths)
-    end
-
-    if "file_compression" in names(ext_info)
-        temp_locals = decompress_frames(ext_info, loc, temp_locals)
-    else
-        temp_locals = map(temp_locals) do tl
-            if isnothing(local_copy)
-                tl
-            elseif tl != local_copy && isfile(local_copy) #ok to move
-                mv(tl,joinpath(loc,tl*"_final"))
-                tl*"_final"
-            elseif isfile(local_copy)
-                local_copy
-            else
-                tl
-            end
-        end
-    end
-
-    @debug "Final files for reading are" temp_locals
-
-    return temp_locals
-end
-
-"""
-UNTESTED. Wasn't working properly last time it was checked.
-"""
-download_images_native(uri, ext_info, local_copy, arch_paths) = begin
-    # Set up input stream
-    stream = BufferStream()
-    have_file = false   #changes to true when file found
-    loc = mktempdir() #Where the final file is found
-    # Parse the URI to catch local files
-    u = URI(uri)
-    arch_type = "archive_format" in names(ext_info) ? ext_info.archive_format[1] : nothing
-
-
-    # Begin asynchronous section. Thanks to Julia Discourse for the technique!
-    @sync begin
-        @async try
-            Downloads.download("$uri",stream;verbose=true)
-        catch exc
-            if !have_file
-                @error "Problem downloading $uri" exc
-            end
-        finally
-            close(stream)
-        end
-
-        decomp = stream
-        if !(arch_type in (nothing,"TAR"))
-            if arch_type == "TGZ"
-                decomp = GzipDecompressorStream(stream)
-            elseif arch_type == "TBZ"
-                decomp = Bzip2DecompressorStream(stream)
-            end
-        end
-        # Now handle having an internal directory structure
-        if arch_path != nothing
-            full_path = joinpath(loc,arch_path)
-            if arch_type in ("TGZ","TBZ","TAR")
-                # callback to abort after reading
-                abort_callback(x) = begin
-                    @info("Found: $have_file")
-                    if have_file == true
-                        if ispath(full_path) && stat(full_path).size > 0
-                            @info "$(stat(full_path))"
-                            cp(full_path,full_path*"_1")
-                            throw(error("Extracted one file to $full_path"))
-                        else
-                            @info("Can't yet see file at path $full_path or size=0")
-                        end     
-                    end
-                    if x.path == arch_path
-                        @info("Extracting", x)
-                        have_file = true
-                        return true
-                    else
-                        @info("Ignoring", x)
-                        return false
-                    end
-                end
-
-                @async try
-                    Tar.extract(abort_callback,decomp,loc)
-                catch exc
-                    if !have_file || !ispath(full_path) || isopen(full_path)
-                        @info("File at $full_path is $(stat(full_path))")
-                        @error "Untar problem" exc
-                    end
-                finally
-                    loc = joinpath(loc,arch_path)
-                    close(decomp)
-                end
-                
-            elseif arch_type == "ZIP"
-                @async begin
-                    w = ZipFile.Reader(stream)
-                    loc,final_file = mktemp()
-                    for f in w.files
-                        if f == arch_path
-                            write(final_file,read(f))
-                            close(final_file)
-                            break
-                        end
-                    end
-                end
-            end
-        else
-            loc,final_file = mktemp()
-            @async begin
-                count = write(final_file,read(stream))
-                println("$count bytes read")
-                close(final_file)
-            end
-        end
-    end   #all @asyncs should finish before proceeding
-    #
-    println("Extracted file to $loc")
-    # Apply any final decompression
-    endloc = loc
-    fdecomp = nothing
-    if file_compression == "GZ"
-        fdecomp = GzipDecompressor()
-    elseif file_compression == "BZ2"
-        fdecomp = Bzip2Decompressor()
-    end
-    if fdecomp != nothing
-        endloc,unc_file = mktemp()
-        out_str = TranscodingStream(fdecomp,open(loc,"r"))
-        write(unc_file,out_str)
-        close(unc_file)
-        println("Decompressed file is $endloc")
-    end
-    return [endloc]
-end
 
 """
 decompress_frames
@@ -802,87 +659,6 @@ valid. Returns `(false,"message")` on failure and `(true,"")` on
 success.  
 """
 check_format(loc,fmt;kwargs...) = (true,"")
-
-## Some utility files
-
-"""
-    list_archive(uri;n=5)
-
-Given an archive `uri`, list the first `n` members. A negative
-number for `n` lists all members. Uses `SimpleBufferStream`.
-"""
-list_archive(u::URI;n=5,compressed=nothing) = begin
-    counter = 1
-
-    # Set up chain of streams
-
-    dldstream = BufferStream()
-    unzipstream = BufferStream()
-    untarstream = BufferStream()
-
-    # Our header information
-
-    hdrs = nothing
-
-    function task_chain(in_str,out_str)
-        @async begin
-            while !eof(in_str)
-                write(out_str, readavailable(in_str))
-            end
-            close(out_str)
-        end
-    end
-    
-    function do_dld(out_stream)
-        @async begin
-            try
-                Downloads.download("$u",outstream;verbose=true)
-            catch exc
-                if counter < n
-                    @error "Problem downloading $uri" exc
-                end
-            finally
-                close(outstream)
-            end
-        end
-    end
-
-    if !(compressed in (nothing,"TAR"))
-        if compressed == "TGZ"
-            decomp = GzipDecompressorStream(in_stream)
-        elseif compressed == "TBZ"
-            decomp = Bzip2DecompressorStream(in_stream)
-        end
-    end        
-
-    # Now handle having an internal directory structure
-    
-    if compressed in ("TGZ","TBZ","TAR")
-
-            # callback to abort after listing
-
-            abort_callback(x) = begin
-                counter = counter + 1
-                if if n > 0 && counter > n
-                    throw(error("Made it to $n"))
-                end
-                @info(x)
-                return true
-            end
-
-            @async try
-                hdrs = Tar.list(abort_callback,decomp)
-            catch exc
-                if counter < n
-                    @error "Untar problem" exc
-                end
-            finally
-                close(decomp)
-            end
-        end
-    end
-    return hdrs
-end
 
 """
     peek_image(a::ImageArchive, cif_block::CifContainer; entry_no=0, check_name=true)
@@ -1008,59 +784,48 @@ peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, 
 
 end
 
-"""
-    peek_image(URI,archive_type,cif_block::CifContainer;entry_no=0, check_name=true)
+peek_image(a::HDFArchive, cif_block::CifContainer; entry_no=0, allow_big_downloads = false) = begin
 
-Find the name of an image in archive of type `archive_type` at `URL`, searching
-from entry number `entry_no`,and check that this image is available in `cif_block`
-if `check_name` is true.
-"""
-peek_image(uri::URI,arch_type,cif_block::CifContainer;entry_no=0,check_name=true) = begin
-
-    cmd_list = Cmd[]
+    ei = first(get_loop(cif_block, "_array_data_external_data.id"))
     
-    if arch_type == "ZIP"
-        throw(error("Peeking into file not supported for ZIP"))
+    if !has_local_version(a, ei)
+        
+        cmd_list = Cmd[]
+        uri = a.original_url
+
+        @debug "Downloading $(local_equivalent(a, ei))"
+        
+        run(Cmd(`curl -s $uri --output $(local_equivalent(a, ei))`,ignorestatus=true))
     end
     
-    decomp_option = ""
-    if arch_type == "TGZ" decomp_option = "-z"
-    elseif arch_type == "TBZ" decomp_option = "-j"
-    elseif arch_type == "TXZ" decomp_option = "-J"
-    else throw(error("Unrecognised archive type $arch_type"))
-    end
-
-    push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
-    push!(cmd_list, Cmd(`tar -t -v $decomp_option -f -`,ignorestatus=true))
-    awkstr1 =  "\$3 > 0 { print \$NF }"
-    awkstr2 =  "\$3 > 0 && FNR >= $entry_no { exit }"
-    push!(cmd_list, `awk -e $awkstr1 -e $awkstr2`)
-
-    @debug "Peeking into $uri for $arch_type starting at $entry_no"
-    @debug "Command list is $cmd_list"
-    fname = nothing
-    try
-        fname = readchomp(pipeline(cmd_list...))
-    catch exc
-        @debug "Finished downloading" exc
-    end
-
-    # Just the last file is the one we want
-    fname = split(fname,"\n")[end]
-    
-    @debug fname
-    if fname != nothing && check_name
-        if haskey(cif_block,"_array_data_external_data.archive_path")
-            pos = indexin([fname],cif_block["_array_data_external_data.archive_path"])[]
-            if pos != nothing && cif_block["_array_data_external_data.uri"][pos] == "$uri"
-                return fname
-            end
-        end
-        return nothing
-    end
-    return fname
+    return local_equivalent(a, ei)
 end
 
-peek_image(u::URI,arch_type) = peek_image(u,arch_type,Block{String}())  #for testing
+"""
+    ping_archive(u::ImageArchive)
+
+Check that an archive is accessible
+"""
+ping_archive(a::BulkArchive, cif_block::CifContainer) = begin
+
+    c = "_array_data_external_data"
+    ei = get_loop(cif_block, "$c.id")
+    all_uris = unique(getproperty(ei, "$c.uri"))
+    bad = filter(all_uris) do au
+        !success(pipeline(`curl -s $au -r 0-0 --fail`, devnull))
+    end
+    if length(bad) > 0
+        @debug "Following URLs not available" bad
+        return nothing
+    end
+
+    return all_uris
+end
+
+ping_archive(a::AddressableArchive, cif_block::CifContainer) = begin
+
+    peek_image(a, cif_block)
+    
+end
 
 end

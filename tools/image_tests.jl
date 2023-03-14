@@ -46,7 +46,7 @@ test_archive_present(incif, local_archives) = begin
 
     messages = []
     for la in local_archives
-        if peek_image(la, incif) == nothing
+        if ping_archive(la, incif) == nothing
             push!(messages, (false, "Unable to access $la"))
         end
     end
@@ -580,8 +580,6 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
     @debug "Created local archive" local_archive
 
-    # get_archive_member_name(incif, local_archive)
-
     print("\nTesting: All archives are accessible: ")
     
     ok = ok & verdict(test_archive_present(incif, local_archive))
@@ -595,8 +593,10 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         println("="^40*"\n")
 
         # Choose image(s) to load
+        
+        peek_image(first(local_archive), incif)
 
-        load_id = find_load_id(incif,local_archive)
+        load_id = find_load_id(incif, local_archive)
 
         if accum > 1
             load_ids = get_id_sequence(incif,load_id,accum)
@@ -762,7 +762,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         subs[k] = abspath(expanduser(v))
     end
     
-    println("\n ImgCIF checker version 2023-03-01\n")
+    println("\n ImgCIF checker version 2023-03-14\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     if parsed_args["dictionary"] != [""]
     end
