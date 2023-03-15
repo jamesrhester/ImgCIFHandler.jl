@@ -791,11 +791,11 @@ peek_image(a::HDFArchive, cif_block::CifContainer; entry_no=0, allow_big_downloa
     if !has_local_version(a, ei)
         
         cmd_list = Cmd[]
-        uri = a.original_url
+        uri = getproperty(ei,"_array_data_external_data.uri")
 
-        @debug "Downloading $(local_equivalent(a, ei))"
+        @debug "Downloading $(local_equivalent(a, ei)) from $uri"
         
-        run(Cmd(`curl -s $uri --output $(local_equivalent(a, ei))`,ignorestatus=true))
+        run(Cmd(`curl -s $uri --output $(local_equivalent(a, ei))`))
     end
     
     return local_equivalent(a, ei)
