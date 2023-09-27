@@ -832,7 +832,7 @@ end
 
 Return a filename that is locally cached
 """
-get_any_local(a::BulkArchive, cif_block::CifContainer) = begin
+get_any_local(a::ImageArchive, cif_block::CifContainer) = begin
 
     catname = "_array_data_external_data"
     if haskey(cif_block,"$catname.id")
