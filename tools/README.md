@@ -123,6 +123,11 @@ are skipped.
 
 ![An example peak fingerprint](peak_fingerprint.png)
 
+```julia image_tests.jl -i -l /home/me/testfiles/35_dnba_30K/unpacked 35_dnba_30K.imgcif
+```
+Run checks on `35_dnba_30K.imgcif`, searching for the images from all archives in directory `/home/me/testfiles/35_dnba_30K/unpacked`.
+The `-l` option is useful if each scan has been archived separately, as it saves long command lines from repeated use of `-s`.
+
 ```
 JULIA_DEBUG=Main julia image_tests.jl <filename>
 ```
