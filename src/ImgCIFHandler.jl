@@ -188,7 +188,12 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
         if one_uri in keys(subs)
             @debug "Found local sub" subs[one_uri]
             subs[one_uri]
+        elseif "Universal" in keys(subs)
+            subs["Universal"]
         else
+            if !isempty(subs)
+                @warn "No local substitute for $one_uri found"
+            end
             mktempdir()
         end
     end
@@ -669,17 +674,7 @@ is true.
 """
 peek_image(a::LocalArchive, cif_block::CifContainer; entry_no=0, check_name=true) = begin
 
-    # For a local archive, some files are automatically present locally; all we need to do is
-    # find the first one in cif_block that matches a local file
-
-    catname = "_array_data_external_data"
-    if haskey(cif_block,"$catname.id")
-        for r in eachrow(get_loop(cif_block, "$catname.id"))
-            if has_local_version(a, r)
-                return local_equivalent(a, r)
-            end
-        end
-    end
+   get_any_local(a, cif_block)
     
 end
 
@@ -715,7 +710,11 @@ end
 
 peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true) = begin
 
-    #TODO: detect already-present images
+    # Find something already present if possible
+    
+    p = get_any_local(a, cif_block)
+    if !isnothing(p) return p end
+    
 
     cmd_list = Cmd[]
     uri = a.original_url
@@ -826,6 +825,24 @@ ping_archive(a::AddressableArchive, cif_block::CifContainer) = begin
 
     peek_image(a, cif_block)
     
+end
+
+"""
+    get_any_local(a::BulkArchive, cif_block::CifContainer)
+
+Return a filename that is locally cached
+"""
+get_any_local(a::BulkArchive, cif_block::CifContainer) = begin
+
+    catname = "_array_data_external_data"
+    if haskey(cif_block,"$catname.id")
+        for r in eachrow(get_loop(cif_block, "$catname.id"))
+            if has_local_version(a, r)
+                return local_equivalent(a, r)
+            end
+        end
+    end
+
 end
 
 end

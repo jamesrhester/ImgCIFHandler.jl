@@ -3,7 +3,11 @@
 #  "julia install_image_tests.jl" to get them installed
 #
 import Pkg
-Pkg.activate(@__DIR__) #uncomment for release version
+
+# Uncomment following for release version, comment to use
+# local development versions of packages
+
+Pkg.activate(@__DIR__)
 
 using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
@@ -580,9 +584,12 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
     @debug "Created local archive" local_archive
 
-    print("\nTesting: All archives are accessible: ")
-    
-    ok = ok & verdict(test_archive_present(incif, local_archive))
+    if connected
+        print("\nTesting: All archives are accessible: ")
+        
+        ok = ok & verdict(test_archive_present(incif, local_archive))
+
+    end
     
     # Test with an image
 
@@ -732,6 +739,11 @@ ignored (but must be provided)."
         metavar = ["original","local"]
         action = "append_arg"
         help = "Use <local> file in place of archive URI <original> (for testing). Use -f to access whole file. All URIs in <filename> must be provided, option may be used multiple times. If <local> is a directory, its contents are assumed to be the unpacked archive."
+
+        "-l", "--local"
+        nargs = 1
+        help = "Use the directory given in <local> in place of all URIs found in the file. This is the equivalent of -s when there is one URI. Useful if all URIs have been unpacked into directory <local>."
+        
         "--skip"
         nargs = 0
         help = "Only check actual images"
@@ -754,7 +766,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
     else
         blockname = parsed_args["blockname"]
     end
+
     subs = Dict(parsed_args["sub"])
+
+    if !isempty(parsed_args["local"])
+        subs["Universal"] = parsed_args["local"][]
+    end
 
     # Convert local directories to absolute paths
 
@@ -767,7 +784,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     if parsed_args["dictionary"] != [""]
     end
 
-    @debug "Parsed arguments" parsed_args
+    @debug "Parsed arguments" parsed_args subs
     
     # Fix loops
 
