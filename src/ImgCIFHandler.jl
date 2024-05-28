@@ -68,6 +68,7 @@ export get_constant_part #for RsyncArchive work
 include("hdf_image.jl")
 include("cbf_image.jl")
 include("adsc_image.jl")
+include("kcd_image.jl")
 include("imgcif.jl")
 include("recip.jl")
 
@@ -105,7 +106,7 @@ by an individual, unique URL
 abstract type AddressableArchive <: ImageArchive end
 
 """
-A tar archive has been created by tar and then optionall
+A tar archive has been created by tar and then optionally
 compressed. The type parameter T refers to the compression used in
 the tar archive. To add a new compression type add it
 to the `decomp_option` method.
