@@ -299,7 +299,7 @@ download_images_os(a::TarArchive, ext_info) = begin
     @debug "For $ext_info need to get $need_to_get"
     if size(need_to_get, 1) > 0
         arch_paths = need_to_get.archive_path
-        push!(cmd_list, Cmd(`curl -s $(ext_info.uri[1])`,ignorestatus=true))
+        push!(cmd_list, Cmd(`curl -s --show-error $(ext_info.uri[1])`,ignorestatus=true))
         j = decomp_option(a)
         if !isnothing(j)
             push!(cmd_list, `tar -C $loc -x $j -f - --occurrence $arch_paths`)

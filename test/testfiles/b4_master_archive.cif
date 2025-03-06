@@ -77,6 +77,8 @@ _diffrn_source.facility	Diamond
       _array_data_external_data.uri
       _array_data_external_data.archive_format
       _array_data_external_data.archive_path
+# filename below turned into absolute file: URL by test
+# routines
     1    CBF b4_mini.tar.bz2 TBZ s01f0001.cbf
     2    CBF b4_mini.tar.bz2 TBZ s01f0002.cbf
     3    CBF b4_mini.tar.bz2 TBZ s01f0003.cbf

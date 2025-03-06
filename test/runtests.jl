@@ -60,7 +60,10 @@ end
 end
 
 @testset "Test extraction of multiple images from archive" begin
-    cf = first(Cif(Path(b4master_arch))).second
+    cf_string = read(b4master_arch, String)
+    # put in absolute path
+    cf_string = replace(cf_string, "b4_mini.tar.bz2" => "file:" * joinpath(@__DIR__, "testfiles", "b4_mini.tar.bz2"))
+    cf = first(cif_from_string(cf_string)).second
     a = first(create_archives(cf))
     imgsum = imgload(cf,["1","2","3"],a)
     @test size(imgsum) == (4148,4362)
