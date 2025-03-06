@@ -76,6 +76,22 @@ cbf_free_goniometer!(handle::Gonio_Handle) = begin
     cbf_error(err_no, extra = "while freeing goniometer, possible memory leak")
 end
 
+cbf_construct_detector(handle::CBF_Handle) = begin
+    det_data = CBF_Detector_Struct(Ptr{Cvoid}(),
+                                     (0.0,0.0),
+                                     (0.0,0.0),
+                                     0,(0,0),handle.handle,
+                                   0)
+    det_handle = Det_Handle(pointer_from_objref(det_data))
+    err_no = ccall((:cbf_construct_detector,libcbf),Cint,
+                   (Ptr{CBF_Handle_Struct},
+                    Ref{Det_Handle},
+                    Cuint),
+                   handle.handle,det_handle,0)
+    cbf_error(err_no, extra = "while constructing detector")
+    return det_handle,det_data
+end
+
 cbf_read_file(filename) = begin
     handle = cbf_make_handle()
     f = open(filename,"r")
@@ -721,19 +737,7 @@ prepare_detector(filename,args...) = begin
     
     # now go and find them
 
-    det_data = CBF_Detector_Struct(Ptr{Cvoid}(),
-                                     (0.0,0.0),
-                                     (0.0,0.0),
-                                     0,(0,0),handle.handle,
-                                   0)
-    det_handle = Det_Handle(pointer_from_objref(det_data))
-    err_no = ccall((:cbf_construct_detector,libcbf),Cint,
-                   (Ptr{CBF_Handle_Struct},
-                    Ref{Det_Handle},
-                    Cuint),
-                   handle.handle,det_handle,0)
-    cbf_error(err_no, extra = "while constructing detector")
-    return det_handle,det_data
+    cbf_construct_detector(handle)
 end
 
 """

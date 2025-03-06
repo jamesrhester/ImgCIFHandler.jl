@@ -360,7 +360,9 @@ end
 
 download_images_os(a::LocalArchive, ext_info) = begin
     for r in eachrow(ext_info)
-        @assert ispath(local_equivalent(a, r))
+        if !ispath(local_equivalent(a, r))
+            throw(error("File $local_equivalent does not exist"))
+        end
     end
 end
 

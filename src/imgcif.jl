@@ -106,6 +106,10 @@ get_axis_settings(imgcif::CifContainer,axis_names, args...) = begin
     
     if haskey(imgcif,"_diffrn_scan.id") && length(imgcif["_diffrn_scan.id"]) > 1 
         our_scan = filter(row->row["$cat.scan_id"] == scanid, scan_frames,view=true)
+        if nrow(our_scan) == 0   #bad scan id
+            @error "No such scan" scanid
+            throw(error("Bad scan identifier $scanid"))
+        end
     else
         our_scan = scan_frames
     end
