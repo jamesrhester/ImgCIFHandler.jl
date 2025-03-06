@@ -16,6 +16,7 @@ using ArgParse
 using CrystalInfoFramework,FilePaths,URIs, Tar
 using Luxor
 using Statistics
+using Dates
 
 # Tests for imgCIF files
 const test_list = []
@@ -539,7 +540,7 @@ fix_loops!(incif) = begin
 end
 
 """
-    run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[])
+    run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[], grid=["detx","dety",1.0,3])
 
 Test `incif` for conformance to imgCIF consistency requirements. Meaning of arguments:
 `images`: run checks on downloaded image
@@ -553,8 +554,9 @@ Test `incif` for conformance to imgCIF consistency requirements. Meaning of argu
 `skip`: skip non-image checks
 `peak_check`: generate an image for checking peak locations
 `peakvals`: list of peaks to include in check
+`grid`: generate a grid of peak checks
 """
-run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[]) = begin
+run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[], grid=[1, 0]) = begin
     ok = true
 
     if !skip
@@ -619,6 +621,8 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
             rethrow()
         end
 
+        @debug "Loaded image " load_id
+        
         if testimage isa String   #we have failed
             verdict([(false,testimage)])
             return (false,[[]])
@@ -643,16 +647,15 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
             ok = ok & verdict(one_test(incif,testimage,load_id))
         end
 
-        # Generate the peak checking image
+        # Generate the peak checking images
 
         if peak_check
 
             # Don't do it unless we have local files
 
-            predicted = accumulate_peaks(incif, peakvals=peakvals, cached=local_archive)
-            @debug "Predicted peaks" predicted
-            create_peak_image(incif, predicted, cached=local_archive)
-        end
+            generate_peak_check(incif, peakvals = peakvals, cached = local_archive, grid = grid)
+
+         end
     end
     
     # Tests requiring fully-downloaded archives
@@ -664,6 +667,54 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
         end
     end
     return (ok,testimage)
+end
+
+"""
+ Generate a grid of peak check images (or just one) showing how well the
+ predicted peak positions match. Note our hard-coded axis names.
+"""
+generate_peak_check(incif; peakvals = [], cached = [], grid = [1, 0]) = begin
+
+    detx_row = indexin(["detx", "ele1_x"], incif["_axis.id"])
+    if isnothing(detx_row[1])
+        detx_row = detx_row[2]
+    else
+        detx_row = detx_row[1]
+    end
+    x_offset = parse(Float64, incif["_axis.offset[1]"][detx_row])
+    y_offset = parse(Float64, incif["_axis.offset[2]"][detx_row])
+
+    predicted = Vector{Vector{Peak}}[]
+    
+    for grid_x_pos in -grid[2]:grid[2]
+
+        incif["_axis.offset[1]"][detx_row] = "$(x_offset + grid_x_pos * grid[1])"
+        
+        @debug "Grid x now" incif["_axis.offset[1]"][detx_row]
+        
+        for grid_y_pos in -grid[2]:grid[2]
+            
+            incif["_axis.offset[2]"][detx_row] = "$(y_offset + grid_y_pos * grid[1])"
+
+            @debug "Grid y now" incif["_axis.offset[2]"][detx_row]
+            
+            new_predicted = accumulate_peaks(incif, peakvals=peakvals, cached=cached)
+
+            @debug "Predicted peaks" new_predicted
+
+            push!(predicted, new_predicted)
+            
+        end
+
+    end
+
+    incif["_axis.offset[1]"][detx_row] = "$(x_offset)"
+    incif["_axis.offset[2]"][detx_row] = "$(y_offset)"
+
+    # Now plot them all in a nice grid
+
+    create_peak_image(incif, predicted, cached=cached, skip=-1)
+
 end
 
 read_peak_file(filename) = begin
@@ -734,6 +785,11 @@ ignored (but must be provided)."
         "--peak-file"
         nargs = 1
         help = "Name of file containing peak information. Peaks information is given as scanid frameno fast slow. All values are whitespace separated. Lines beginning with `#` are ignored."
+        "-g", "--grid"
+        nargs = 2
+        metavar = ["spacing", "number"]
+        default = ["1.0", "0"]
+        help = "Create a grid of peak checks, varying the x,y offsets of detx by <spacing>, creating <number> steps in each direction"
         "-s", "--sub"
         nargs = 2
         metavar = ["original","local"]
@@ -779,8 +835,9 @@ if abspath(PROGRAM_FILE) == @__FILE__
         subs[k] = abspath(expanduser(v))
     end
     
-    println("\n ImgCIF checker version 2023-03-14\n")
+    println("\n ImgCIF checker version 2024-06-21\n")
     println("Checking block $blockname in $(incif.original_file)\n")
+    println(now())
     if parsed_args["dictionary"] != [""]
     end
 
@@ -814,6 +871,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
         parsed_args["output-png"] = true
         parsed_args["full-download"] = true
     end
+
+    grid = parse.(Float64, parsed_args["grid"])
     
     result,img = run_img_checks(incif[blockname],
                                 images=parsed_args["check-images"],
@@ -826,7 +885,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 savepng = parsed_args["output-png"],
                                 skip = parsed_args["skip"],
                                 peak_check = parsed_args["peaks"],
-                                peakvals = peakvals
+                                peakvals = peakvals,
+                                grid = grid
                                 )
     println("\n====End of Checks====")
     if result exit(0) else exit(1) end

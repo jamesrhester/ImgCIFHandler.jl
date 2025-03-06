@@ -56,7 +56,7 @@ accumulate_peaks(incif; peakvals = [], scan_id = nothing, maxframes =
 
             # Refine target frame
             
-            _, new_p = create_peak_area(incif, p;skip=1, range=5,
+            _, new_p = create_peak_area(incif, p;skip=1, range=1,
                                                 cached = cached)
             
             @debug "Old, new peaks:" p new_p
@@ -128,7 +128,7 @@ positions. The excerpt is created by adding all images over a range of
 image. So the default values will use 5 images, where each image is
 separated by 1 frames.  
 """
-create_peak_image(incif,predicted::Vector{Vector{Peak}};redo=true, skip=1,range=5,kwargs...) = begin
+create_peak_image(incif, predicted::Vector{Vector{Vector{Peak}}}; redo=true, skip=1,range=5,kwargs...) = begin
 
     if skip < 0 || range < 0
         skip, range = guess_skip_range(incif)
@@ -137,23 +137,42 @@ create_peak_image(incif,predicted::Vector{Vector{Peak}};redo=true, skip=1,range=
     # Create the image excerpts
 
     all_images = []
-    for one_pred_set in predicted
-        image_set =  []
-        for p in one_pred_set
-            @debug "Processing:" p
-            one_img, max_peak = create_peak_area(incif, p;skip=skip,range=range,kwargs...)
-            @debug "max peak" max_peak
-            if frame(max_peak) != frame(p)
-                @warn "Max peak intensity $(intensity(max_peak)) in frame $(frame(max_peak)), not $(frame(p))"
+    
+    for one_grid_point in predicted
+
+        group_images = []
+
+        for one_pred_set in one_grid_point
+            image_set =  []
+            for p in one_pred_set
+                @debug "Processing:" p
+                one_img, max_peak = create_peak_area(incif, p;skip=skip,range=range,kwargs...)
+                @debug "max peak" max_peak
+                if frame(max_peak) != frame(p)
+                    @warn "Max peak intensity $(intensity(max_peak)) in frame $(frame(max_peak)), not $(frame(p))"
+                end
+                push!(image_set,one_img)
             end
-            push!(image_set,one_img)
+            push!(group_images,image_set)
         end
-        push!(all_images,image_set)
+        push!(all_images, group_images)
     end
 
     # Lay them out nicely
 
-    display_peak_table(all_images,"$(incif.original_file)"*"_peaks"*".png")
+    # Find the beam centre coords
+    
+    detx_pos = indexin(["detx", "ele1_x"], incif["_axis.id"])
+    if isnothing(detx_pos[1])
+        detx_pos = detx_pos[2]
+    else
+        detx_pos = detx_pos[1]
+    end
+    
+    cent_coords = incif["_axis.offset[1]"][detx_pos], incif["_axis.offset[2]"][detx_pos]
+    
+    caption = "$(basename(incif.original_file)) Centre $(cent_coords[1]) $(cent_coords[2])"
+    display_peak_table(all_images,"$(incif.original_file)"*"_peaks"*".png", caption = caption)
 end
 
 create_peak_area(incif,p::Peak;skip=1,range=5,window=10, cached = Vector{ImageArchive}) = begin
@@ -196,15 +215,25 @@ create_peak_area(incif,p::Peak;skip=1,range=5,window=10, cached = Vector{ImageAr
     max_coords = fast, slow
     corners = (max(1,slow-window),max(1,fast-window),min(slow_m,slow+window),min(fast_m,fast+window))
     acc_img = zeros(corners[4]-corners[2]+1, corners[3]-corners[1]+1)
+
+    @debug "Corners" corners
+    
+    # find an overload value
+
+    if haskey(incif,"_array_intensities.overload")
+        overload = parse(Float64, incif["_array_intensities.overload"][])
+    else
+        overload = typemax(eltype(full_img))
+    end
     
     for fid in frame_ids
         full_img = imgload(incif, fid, cached)
 
-    # Window down and remove negative values
+    # Window down and remove negative/overload/mask values
 
         full_img = full_img[corners[2]:corners[4],corners[1]:corners[3]]
         for i in eachindex(full_img)
-            full_img[i] = full_img[i] < 0 ? 0 : full_img[i]
+            full_img[i] = (full_img[i] < 0 || full_img[i] >= overload ) ? 0 : full_img[i]
         end
 
         max_img = maximum(full_img)
@@ -212,13 +241,16 @@ create_peak_area(incif,p::Peak;skip=1,range=5,window=10, cached = Vector{ImageAr
             frame_max = fid
             max_val = max_img
             max_coords = Tuple(argmax(full_img))
-            @debug "New peak pos" max_coords
+            @debug "New peak pos" fid max_coords
         end
 
         acc_img += full_img
     end
 
+    @debug "Range, max" frame_ids frame_max
+
     frame_max = indexin([frame_max],frame_ids)[]
+    
     max_peak = Peak(scan_id, frame_nos[frame_max], max_coords[2]+corners[1], max_coords[1] + corners[2], max_val)
     acc_img/maximum(acc_img), max_peak
 end
@@ -227,10 +259,9 @@ end
     display_peak_table(image_list;border=30)
 
 `image_list` contains a list of image lists. Each list should be laid out
-horizontally. All images must be the same
-dimensions.
+horizontally. All images are assumed to be the same dimensions.
 """
-display_peak_table(image_list,fname) = begin
+display_peak_table(image_list, fname; caption = "") = begin
 
     if length(image_list) == 0
         @warn "No peaks found, use --peakval to manually indicate peak positions"
@@ -239,8 +270,18 @@ display_peak_table(image_list,fname) = begin
     
     # Calculate layout parameters based on image size
 
+    # Get the longest and tallest entries
+    # Outer dimension is grid step, next is row, inner is across
+    
+    max_down = maximum(length.(image_list))
+    max_across = maximum( map( x-> maximum(length.(x)), image_list))
+    side = sqrt(length(image_list))
+
+    @debug "Max width, height for $side x $side grid" max_across max_down
+    
     one_ht = one_wid = 0
-    for row in image_list
+    test_list = first(image_list)
+    for row in test_list
         for cell in row
             h, w = size(cell)
             one_ht = h > one_ht ? h : one_ht
@@ -248,21 +289,66 @@ display_peak_table(image_list,fname) = begin
         end
     end
     
-    border = Int(round(one_wid/2))
+    border = Int(round(one_wid))
 
-    max_len = maximum(length.(image_list))
+    @debug "For peak table" one_ht one_wid border
 
-    @debug "For peak table" one_ht one_wid max_len
-    Luxor.Drawing((one_wid+border)*max_len + border,
-                  (one_ht+border)*length(image_list) + border,
+    # Drawing is an n x n grid of peak displays, each max_across wide
+    # and max_down high. Add 20 at end for caption.
+    
+    Luxor.Drawing((one_wid+border)*max_across*side + border,
+                  (one_ht+border)*max_down*side + border + 20,
                   fname)
+    
     background("white")
 
-    for (i,row) in enumerate(image_list)
-        for (j,col) in enumerate(row)
-            placeimage(Gray.(col),Point(2*border+(j-1)*one_wid,2*border+(i-1)*one_ht))
+    @debug "Picture dimensions" (one_wid + border)*max_across*side + border (one_ht + border)*max_down*side + border
+
+    sethue("red")
+    fontsize(12)
+
+    for (n, one_group) in enumerate(image_list)
+        
+        grid_x, grid_y = divrem(n-1, side)
+        grid_x *= (one_wid+border)*max_across + border
+        grid_y *= (one_ht + border)*max_down + border
+
+        overall_score = 0
+        for (i,row) in enumerate(one_group)
+            row_pos = 2*border + (i-1)*one_ht + grid_y
+            row_score = 0.0
+            for (j,col) in enumerate(row)
+                col_pos = 2*border+(j-1)*one_wid + grid_x
+                placeimage(Gray.(col),Point(col_pos,row_pos))
+
+                # score it
+
+                score = score_image(col)
+                text("$score", Point(col_pos, row_pos))
+                row_score += score
+            end
+
+            # output the average score
+            row_av = round(row_score/length(row), digits=2)
+            fontsize(14)
+            text("$(row_av)", Point(grid_x, row_pos + one_ht/2))
+            fontsize(12)
+            overall_score += row_av
         end
+
+        full_score = round(overall_score/length(one_group), digits=2)
+        fontsize(14)
+        sethue("blue")
+        text("$full_score", Point(grid_x, grid_y + 2*border + length(one_group)*one_ht))
+        sethue("red")
+        fontsize(12)
     end
+
+    # add caption
+    
+    sethue("black")
+    fontsize(16)
+    text(caption, Point(border, (one_ht + border)*max_down*side + border + 10))
 
     # output
 
@@ -304,4 +390,44 @@ guess_skip_range(incif) = begin
     end
     
     return skip, range
+end
+
+"""
+Assign a number to an image, scoring how well it shows a peak. If
+the peak is too weak, zero. If it is too close to the edges, 0.5.
+Otherwise 1.
+"""
+score_image(img)  = begin
+    md = median(img)
+    mx = maximum(img)
+    if mx < 2*md
+        return 0.0
+    end
+    
+    if mx > 2*md &&  mx < 3*md
+        return 0.5
+    end
+
+    amax = argmax(img)
+    margin = 0.25 .* size(img)  #outer quarter
+    for idx in (1,2)
+
+        @debug amax margin size(img)
+        if amax[idx] < margin[idx] || amax[idx] > size(img)[idx] - margin[idx]
+            return 0.5
+        end
+    end
+
+    return 1 
+end
+
+"""
+Experimental routine for finding peaks
+"""
+peak_find(img) = begin
+
+    # Segment
+
+    segs = fast_scanning(img, median(img))
+    
 end
