@@ -27,6 +27,7 @@ import Tar
 using CodecBzip2
 using CodecZlib
 using Downloads
+using ZipArchives
 
 # See format-specific includes for more using statements
 
@@ -152,6 +153,8 @@ create_archives(c::CifContainer; subs = Dict()) = begin
     
     dl_info = unique(c["$cat_name.uri"])
     test_uris = URI.(dl_info)
+
+    @debug "Unique URIs before resolution" test_uris
 
     # catch relative URIs and make them absolute
 
@@ -496,6 +499,17 @@ local_equivalent(a::HDFArchive, ext_info) = begin
     base = joinpath(a.local_cache, unique_part)
 end
 
+"""
+    local_equivalent(a::CompressedArchive)
+
+The local file name for the archive itself, if downloaded
+in full.
+"""
+local_equivalent(a::CompressedArchive) = begin
+    lname = basename(a.original_url.path)
+    return joinpath(get_local_dir(a), lname)
+end
+
 has_local_version(a::ImageArchive, ext_info) = begin
     l = local_equivalent(a, ext_info)
     if isnothing(l)
@@ -669,13 +683,11 @@ success.
 check_format(loc,fmt;kwargs...) = (true,"")
 
 """
-    peek_image(a::ImageArchive, cif_block::CifContainer; entry_no=0, check_name=true)
+    peek_image(a::LocalArchive, cif_block::CifContainer)
 
-Find the name of an image in `a`, searching for `entry_no`, and
-check if this image is listed in `cif_block` if `check_name`
-is true.
+Find the name of an image in `a`.
 """
-peek_image(a::LocalArchive, cif_block::CifContainer; entry_no=0, check_name=true) = begin
+peek_image(a::LocalArchive, cif_block::CifContainer; kwargs...) = begin
 
    get_any_local(a, cif_block)
     
@@ -684,12 +696,9 @@ end
 """
     peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true)
 
-Find the name of an image in `a`, searching for `entry_no`, and
-check if this image is listed in `cif_block` if `check_name`
-is true. If `extract` the image is also retrieved to the local
-cache.
+Find the name of an image in `a`.
 """
-peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true) = begin
+peek_image(a::RsyncArchive, cif_block::CifContainer; kwargs...) = begin
 
     # For an Rsync archive, some files are automatically present
     # locally; all we need to do is find the first one in cif_block
@@ -711,7 +720,7 @@ peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true
     
 end
 
-peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true) = begin
+peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true, kwargs...) = begin
 
     # Find something already present if possible
     
@@ -786,7 +795,7 @@ peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, 
 
 end
 
-peek_image(a::HDFArchive, cif_block::CifContainer; entry_no=0, allow_big_downloads = false) = begin
+peek_image(a::HDFArchive, cif_block::CifContainer; max_down = 2e7, kwargs...) = begin
 
     ei = first(get_loop(cif_block, "_array_data_external_data.id"))
     
@@ -795,12 +804,83 @@ peek_image(a::HDFArchive, cif_block::CifContainer; entry_no=0, allow_big_downloa
         cmd_list = Cmd[]
         uri = getproperty(ei,"_array_data_external_data.uri")
 
+        r = request(uri)
+        fs = get_file_size(r)
+        
+        if fs == 0
+
+            throw(error("Cannot determine file size for $uri. Download manually and use -l or -s options"))
+        elseif fs > max_down
+
+            throw(error("$uri size $fs exceeds maximum download limit of $max_down, please use -m option or download manually and use -l / -s options"))
+        end
+        
         @debug "Downloading $(local_equivalent(a, ei)) from $uri"
         
         run(Cmd(`curl -s $uri --output $(local_equivalent(a, ei))`))
     end
     
     return local_equivalent(a, ei)
+end
+
+peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7) = begin
+
+    # Find something already present if possible
+    
+    p = get_any_local(a, cif_block)
+    if !isnothing(p) return p end
+    
+    # Get entire Zip file
+    
+    ei = first(get_loop(cif_block, "_array_data_external_data.id"))
+    uri = getproperty(ei,"_array_data_external_data.uri")
+
+    if !ispath(local_equivalent(a))
+
+        # Determine file size
+        
+        fs = get_file_size(request(uri))
+        
+        if fs > max_down
+            throw(error("File size $fs too large (max $max_down). Consider using -l or -s options after unpacking locally, or increasing maximum download using -m"))
+        elseif fs == 0
+            throw(error("Unable to determine file size for $uri. Download and unpack locally then use -l or -s options"))
+        end
+    
+        @debug "Now downloading $uri"
+        
+        Downloads.download(uri, local_equivalent(a))
+
+    end
+
+    # Extract an image
+
+    @debug "Extracting $(local_equivalent(a, ei)) from $uri at $(local_equivalent(a))"
+
+    full_archive = open(local_equivalent(a),"r")
+    zr = ZipReader(read(full_archive))
+    path_in_arch = getproperty(ei, "_array_data_external_data.archive_path")
+    if !(path_in_arch in zip_names(zr))
+        throw(error("Bad archive $uri: missing $path_in_arch"))
+    end
+
+    in_mem = zip_readentry(zr, path_in_arch)
+    fo = open(local_equivalent(a, ei), "w")
+    write(fo, in_mem)
+    close(fo)
+
+    return local_equivalent(a, ei)
+    
+end
+
+get_file_size(r) = 0
+
+get_file_size(r::Response) = begin
+    h = Dict(r.headers)
+    if "content-length" in keys(h)
+        return parse(Int64, h["content-length"])
+    end
+    return 0
 end
 
 """

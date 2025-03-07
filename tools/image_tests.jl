@@ -540,12 +540,13 @@ fix_loops!(incif) = begin
 end
 
 """
-    run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[], grid=["detx","dety",1.0,3])
+    run_img_checks(incif;images=false,always=false,full=false,max_down=1,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[], grid=["detx","dety",1.0,3])
 
 Test `incif` for conformance to imgCIF consistency requirements. Meaning of arguments:
 `images`: run checks on downloaded image
 `always`: always run checks on images, even if previous checks fail
 `full`: download all referenced archives in full
+`max_down`: maximum automatic download size
 `connected`: perform checks that require an internet connection
 `pick`: archive member to download for image checks
 `subs`: dictionary of uri -> local file correspondences to avoid downloading
@@ -556,7 +557,7 @@ Test `incif` for conformance to imgCIF consistency requirements. Meaning of argu
 `peakvals`: list of peaks to include in check
 `grid`: generate a grid of peak checks
 """
-run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[], grid=[1, 0]) = begin
+run_img_checks(incif;images=false,always=false,full=false,max_down=1,connected=false,pick=1,subs=Dict(),savepng=false,accum=1,skip=false,peak_check=false,peakvals=[], grid=[1, 0]) = begin
     ok = true
 
     if !skip
@@ -603,7 +604,7 @@ run_img_checks(incif;images=false,always=false,full=false,connected=false,pick=1
 
         # Choose image(s) to load
         
-        peek_image(first(local_archive), incif)
+        peek_image(first(local_archive), incif, max_down = max_down)
 
         load_id = find_load_id(incif, local_archive)
 
@@ -765,6 +766,11 @@ parse_cmdline(d) = begin
         "-f", "--full-download"
         help = "Fully download archive for image and archive checks (required for ZIP)"
         nargs = 0
+        "-m", "--max-download"
+        help = "Maximum archive size to download automatically, in megabytes"
+        nargs = 1
+        default = [1]
+        arg_type = Int64
         "-n", "--no-internet"
         help = "Do not check raw image archive existence or contents"
         nargs = 0
@@ -835,7 +841,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         subs[k] = abspath(expanduser(v))
     end
     
-    println("\n ImgCIF checker version 2024-06-21\n")
+    println("\n ImgCIF checker version 2025-03-07\n")
     println("Checking block $blockname in $(incif.original_file)\n")
     println(now())
     if parsed_args["dictionary"] != [""]
@@ -878,6 +884,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 images=parsed_args["check-images"],
                                 always=parsed_args["always-check-images"],
                                 full = parsed_args["full-download"],
+                                max_down = parsed_args["max-download"][] * 1e6,
                                 connected = !parsed_args["no-internet"],
                                 pick = parsed_args["pick"][],
                                 accum = parsed_args["accumulate"][],
