@@ -2,7 +2,6 @@
 using ImgCIFHandler
 using CrystalInfoFramework
 using DataFrames
-using FilePaths
 using Test
 using URIs
 

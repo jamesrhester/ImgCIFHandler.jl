@@ -38,7 +38,7 @@ end
 
 # Version given a filename
 get_detector_axis_settings(filename::AbstractString,args...) = begin
-    get_detector_axis_settings(first(Cif(Path(filename),native=true)).second,args...)
+    get_detector_axis_settings(first(Cif(filename)).second,args...)
 end
 
 # Version if no scanid or frameid
@@ -48,7 +48,7 @@ get_detector_axis_settings(imgcif::CifContainer) = begin
 end
 
 get_gonio_axis_settings(filename::AbstractString,args...) = begin
-    get_gonio_axis_settings(first(Cif(Path(filename),native=true)).second,args...)
+    get_gonio_axis_settings(first(Cif(filename)).second,args...)
 end
 
 get_gonio_axis_settings(imgcif::CifContainer, args...) = begin
@@ -57,7 +57,7 @@ get_gonio_axis_settings(imgcif::CifContainer, args...) = begin
 end
 
 get_measurement_axis(filename,scanid) = begin
-    get_measurement_axis(first(Cif(Path(filename),native=true)).second,scanid)
+    get_measurement_axis(first(Cif(filename)).second,scanid)
 end
 
 get_measurement_axis(imgcif::CifContainer,scanid) = begin

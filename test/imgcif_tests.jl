@@ -6,15 +6,15 @@
 end
 
 @testset "Test scan, frame no extraction" begin
-    bb = first(Cif(Path(b4master))).second
+    bb = first(Cif(b4master)).second
     s,f = ImgCIFHandler.scan_frame_from_img_name("test_cbf_unzipped/s01f0003.cbf",nothing,bb)
     println("$s,$f")
     @test s == "SCAN1" && f == 3
-    bb = first(Cif(Path(b4master_rem))).second
+    bb = first(Cif(b4master_rem)).second
     uri = "https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2"
     s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"s01f0014.cbf",bb)
     @test s == "SCAN1" && f == 14
-    bb = first(Cif(Path(multi_scan))).second
+    bb = first(Cif(multi_scan)).second
     uri = "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
     s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"m0220c_02_0171.cbf",bb)
     @test s == "SCAN02" && f == 171
@@ -25,13 +25,13 @@ end
 end
 
 @testset "Test gonio axis handling" begin
-    cc = first(Cif(Path(multi_scan),native=true)).second
+    cc = first(Cif(multi_scan)).second
     gonio_axes = get_gonio_axes(cc)
     @test gonio_axes[1] == ["OMEGA","KAPPA","PHI"]
 end
 
 @testset "Test axis calculations" begin
-    cc = first(Cif(Path(multi_scan),native=true)).second
+    cc = first(Cif(multi_scan)).second
     @test get_dependency_chain(cc,"PHI")==["PHI","KAPPA","OMEGA"]
 end
 
@@ -41,7 +41,7 @@ end
 
         cbf_pc = get_pixel_coordinates(testfile,5,9,"SCAN$sname",6)
 
-        tfc = first(Cif(Path(testfile))).second
+        tfc = first(Cif(testfile)).second
         
         ich_pc = get_pixel_coordinates(tfc,5,9,"SCAN$sname",6)
 
@@ -58,7 +58,7 @@ end
         cbf_centre = get_beam_centre(testfile)
         cbf_centre_scan = get_beam_centre(testfile,"SCAN$sname",2)
         
-        tfc = first(Cif(Path(testfile))).second
+        tfc = first(Cif(testfile)).second
     
         ich_centre = get_beam_centre(tfc)
         ich_centre_scan = get_beam_centre(tfc,"SCAN$sname",2)
