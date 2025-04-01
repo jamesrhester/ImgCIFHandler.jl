@@ -13,7 +13,7 @@ using ImgCIFHandler
 using ImageInTerminal, Colors,ImageContrastAdjustment
 using ImageTransformations
 using ArgParse
-using CrystalInfoFramework,FilePaths,URIs, Tar
+using CrystalInfoFramework,URIs, Tar
 using Luxor
 using Statistics
 using Dates
@@ -822,7 +822,7 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     parsed_args = parse_cmdline("Check contents of imgCIF files")
     #println("$parsed_args")
-    incif = Cif(FilePaths.Path(parsed_args["filename"]),native=true)
+    incif = Cif(parsed_args["filename"])
     if isnothing(parsed_args["blockname"])
         blockname = first(incif).first
     else
