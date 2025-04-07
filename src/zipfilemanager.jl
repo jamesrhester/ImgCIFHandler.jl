@@ -44,11 +44,11 @@ using `insecure` keyword to allow non-SSL connections"))
 
         # Some simple servers can't handle empty start bytes
         
-        if full_size <= 0
+#       if full_size <= 0
             range_str = "bytes=-65000" #hope this one understands
-        else
-            range_str = "$(full_size-65000)-$full_size"
-        end
+#        else
+#            range_str = "$(full_size-65000)-$(full_size - 1)"
+#        end
 
         @debug "Using $range_str for download"
         
@@ -66,7 +66,10 @@ using `insecure` keyword to allow non-SSL connections"))
         # Now download the full end of the zip file
 
         seek(io, 0)
-        req = request(real_url, headers=["Range" => "$cdir-"], output = io)
+        req = request(real_url, headers=["Range" => "bytes=$cdir-"], output = io)
+
+        @debug "Result of central directory request" req
+        
         file_dir = interpret_cdfh(io, 0, num_entries)
         ZipArchive(local_cache, URI(original_url), Dict(file_dir), use_insecure)
     else
@@ -86,14 +89,13 @@ download_images_os(a::ZipArchive, ext_info) = begin
     @debug "For $ext_info need to get $need_to_get"
     if size(need_to_get, 1) > 0
         arch_paths = need_to_get.archive_path
-        for ntg in need_to_get
+        for ntg in eachrow(need_to_get)
             ap = ntg.archive_path
             start, comp_len = get_file_offset(a, ap)
             if start >= 0
                 io = IOBuffer()
-                download(get_real_url(a), headers = ["Range" => "bytes=$offset-$(offset + comp_len)"],
-                         output = io)
-                zip_deflate(io, 0, local_equivalent(a, ntg))
+                download("$(get_real_url(a))", io, headers = ["Range" => "bytes=$start-$(start + comp_len)"])
+                zip_deflate(io, 0, comp_len, local_equivalent(a, ntg))
             else
                 @warn "Unable to download $ntg"
             end
@@ -172,7 +174,7 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
 
         @debug "Obtained compressed chunk" resp
         
-        zip_deflate(io, 0, local_equivalent(a, ei))
+        zip_deflate(io, 0, file_len, local_equivalent(a, ei))
     end
         
     return local_equivalent(a, ei)
@@ -190,7 +192,7 @@ get_nth_zip_file(zip_archive, n::Int, target_dir) = begin
     
     fname, (file_offset, comp_len) = all_files[n]
     zf = open(zip_archive, "r")
-    zip_deflate(zf, file_offset, joinpath(target_dir, fname))
+    zip_deflate(zf, file_offset, comp_len, joinpath(target_dir, fname))
     
 end
 
@@ -307,6 +309,7 @@ get_zip_file_entry(io::IO, offset) = begin
         throw(error("Incorrect offset for file entry: $offset $sig"))
     end
 
+    
     seek(io, offset + 20)
     comp_len = readle(io, UInt32)
     seek(io, offset + 28)
@@ -318,7 +321,7 @@ get_zip_file_entry(io::IO, offset) = begin
 
     fname = transcode(String, read(io, nlen))
     next_entry = offset + 46 + nlen + mlen + klen
-    chunk_len = comp_len + 30 + nlen + mlen + 100 #extra 100 for safety
+    chunk_len = 30 + nlen + mlen + comp_len
     return fname, file_loc, chunk_len, next_entry
 
 end
@@ -326,7 +329,7 @@ end
 """
     Deflate a stream into the supplied file
 """
-zip_deflate(io::IO, offset, dest_file) = begin
+zip_deflate(io::IO, offset, chunk_len, dest_file) = begin
 
     @debug "Deflating" offset dest_file
     
@@ -340,6 +343,16 @@ zip_deflate(io::IO, offset, dest_file) = begin
         throw(error("Incorrect offset for file entry: $offset $sig"))
     end
 
+    # Get general purpose bit flag
+    seek(io, offset + 6)
+    bitf = readle(io, UInt16)
+
+    @debug "Bit flags" bitf
+    
+    if bitf & 0x1 << 3 > 0
+        @warn "Zip: no compressed size available in local file header"
+    end
+
     seek(io, offset + 8)
     decomp_type = readle(io, UInt16)
     seek(io, offset + 18)
@@ -350,6 +363,10 @@ zip_deflate(io::IO, offset, dest_file) = begin
     mlen = readle(io, UInt16)
 
     fname = transcode(String, read(io, nlen))
+
+    if comp_size == 0    #didn't know at time of writing
+        comp_size = chunk_len -30 - nlen - mlen
+    end
     
     @debug "Decomp $fname starting at $(offset + 30 + nlen + mlen)" decomp_type Int64(decomp_size) Int64(comp_size) Int64(nlen) Int64(mlen)
     
