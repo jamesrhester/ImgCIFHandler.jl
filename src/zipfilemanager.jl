@@ -15,7 +15,7 @@ end
 Create a ZipArchive instance. If `insecure` is true, allow
 downloading by ftp/http even if ftps/https was requested.
 """
-ZipArchive(local_cache, original_url; insecure = false) = begin
+ZipArchive(local_cache::AbstractString, original_url::AbstractString; insecure = false) = begin
 
     if make_insecure(original_url) == original_url
         insecure = true
@@ -79,6 +79,8 @@ using `insecure` keyword to allow non-SSL connections"))
         ZipArchive(local_cache, URI(original_url), Dict(), insecure)
     end
 end
+
+ZipArchive(local_cache, original_url; insecure = false) = ZipArchive("$local_cache", "$original_url", insecure = insecure)
 
 get_real_url(a::ZipArchive) = a.insecure ? make_insecure(a.original_url) : a.original_url
 

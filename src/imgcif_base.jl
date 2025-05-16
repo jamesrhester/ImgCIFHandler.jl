@@ -111,7 +111,7 @@ end
 
 create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="") = begin
 
-    arch_list = []
+    arch_list = ImageArchive[]
 
     uq_u = unique(u)
 
@@ -274,7 +274,7 @@ download_images_os(a::RsyncArchive, ext_info) = begin
 
     aurl = "$(a.original_url)"
     for r in eachrow(ext_info)
-        full_uri = getproperty(r,"$(c)uri")
+        full_uri = "$(getproperty(r,"$(c)uri"))"
         if !startswith("$full_uri", aurl)
             throw(error("Asked to download from $full_uri but archive is for $aurl"))
         end
@@ -515,10 +515,12 @@ imgload(a::ImageArchive, ext_info::DataFrame) = begin
     return final_image
 end
 
-imgload(c::CifContainer, scan_id, frame_no::Int, a::ImageArchive) = begin
+imgload(c::CifContainer, scan_id, frame_no::Int, a::Vector{ImageArchive}) = begin
     bin_ids = bin_id_from_scan_frame(c, scan_id, frame_no)
     imgload(c, bin_ids, a)
 end
+
+imgload(c::CifContainer, scan_id, frame_no::Int, a::ImageArchive) = imgload(c, scan_id, frame_no, [a])
 
 """
     imgload(c::CIF)
@@ -531,7 +533,7 @@ the second argument.
 imgload(c::Cif) = begin
     cc = first(c).second
     a = create_archives(cc)
-    imgload(cc, first(a))
+    imgload(cc, a)
 end
 
 """
@@ -540,10 +542,12 @@ end
 Return the image referenced by the first encountered `_array_data.binary_id` in
 CIF block `c`. `a` is an archive created using `create_archive`.
 """
-imgload(c::CifContainer, a::ImageArchive) = begin
+imgload(c::CifContainer, a::Vector{ImageArchive}) = begin
     f_id = c["_array_data.binary_id"][1]
     imgload(c, f_id, a)
 end
+
+imgload(c::CifContainer, a::ImageArchive) = imgload(c, [a])
 
 imgload(s::AbstractString) = begin
     imgload(Cif(s))
@@ -812,13 +816,15 @@ do a GET (nginx on Zenodo)
 """
     Handles secure connections if requested
 """
-handles_secure(server_url) = begin
+handles_secure(server_url::AbstractString) = begin
     req = request(server_url, headers = ["Range" => "bytes=0-10"],
                   throw = false)
     return !is_ssl_error(req)
 end
 
-supports_range_header(server_url) = begin
+handles_secure(server_url::URIs.URI) = handles_secure("$server_url")
+
+supports_range_header(server_url::AbstractString) = begin
 
     downloader = Downloader()
 
@@ -848,6 +854,8 @@ supports_range_header(server_url) = begin
     return is_partial_download(req)
     
 end
+
+supports_range_header(server_url::URIs.URI) = supports_range_header("$server_url")
 
 is_ssl_error(r::RequestError) = r.code == 35
 
