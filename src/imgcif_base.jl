@@ -459,7 +459,7 @@ imgload(c::CifContainer,bin_ids, a::ImageArchive) = begin
     imgload(a, dl_info)
 end
 
-imgload(c::CifContainer, bin_ids, a::Vector) = begin
+imgload(c::CifContainer, bin_ids, a::Vector{ImageArchive}) = begin
 
     dl_info = external_specs_from_bin_ids(bin_ids, c)
     for la in a
