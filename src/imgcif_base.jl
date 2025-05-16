@@ -459,7 +459,7 @@ imgload(c::CifContainer,bin_ids, a::ImageArchive) = begin
     imgload(a, dl_info)
 end
 
-imgload(c::CifContainer, bin_ids, a::Vector{ImageArchive}) = begin
+imgload(c::CifContainer, bin_ids, a::Vector{<:ImageArchive}) = begin
 
     dl_info = external_specs_from_bin_ids(bin_ids, c)
     for la in a
@@ -542,7 +542,7 @@ end
 Return the image referenced by the first encountered `_array_data.binary_id` in
 CIF block `c`. `a` is an archive created using `create_archive`.
 """
-imgload(c::CifContainer, a::Vector{ImageArchive}) = begin
+imgload(c::CifContainer, a::Vector{<:ImageArchive}) = begin
     f_id = c["_array_data.binary_id"][1]
     imgload(c, f_id, a)
 end
