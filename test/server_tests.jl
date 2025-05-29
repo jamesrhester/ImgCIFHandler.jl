@@ -3,8 +3,8 @@
 using LiveServer
 
 fire_up_server() = begin
-    serve_dir = joinpath(@__DIR__, "testfiles/test_cbf_unzipped")
-    @async LiveServer.serve(dir = serve_dir, port=8001, verbose=true, debug=true)
+    serve_dir = joinpath(@__DIR__, "testfiles")
+    @async LiveServer.serve(dir = serve_dir, port=8001)
 end
 
 prepare_cf() = begin
