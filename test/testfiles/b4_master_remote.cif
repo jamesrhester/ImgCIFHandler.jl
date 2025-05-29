@@ -66,25 +66,6 @@ _diffrn_radiation.type     'Synchrotron X-ray Source'
 1   1    1  
 1   2    2  
 1   3    3  
-1   4    4  
-1   5    5  
-1   6    6  
-1   7    7  
-1   8    8  
-1   9    9  
-1   10   10 
-1   11   11 
-1   12   12 
-1   13   13 
-1   14   14 
-1   15   15 
-1   16   16 
-1   17   17 
-1   18   18 
-1   19   19 
-1   20   20 
-1   21   21 
-1   22   22 
   
     loop_
       _array_data_external_data.id
@@ -92,28 +73,9 @@ _diffrn_radiation.type     'Synchrotron X-ray Source'
       _array_data_external_data.archive_format
       _array_data_external_data.uri
       _array_data_external_data.archive_path
-   1    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0001.cbf
-   2    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0002.cbf
-   3    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0003.cbf
-   4    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0004.cbf
-   5    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0005.cbf
-   6    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0006.cbf
-   7    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0007.cbf
-   8    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0008.cbf
-   9    CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0009.cbf
-   10   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0010.cbf
-   11   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0011.cbf
-   12   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0012.cbf
-   13   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0013.cbf
-   14   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0014.cbf
-   15   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0015.cbf
-   16   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0016.cbf
-   17   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0017.cbf
-   18   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0018.cbf
-   19   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0019.cbf
-   20   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f0020.cbf
-   21   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f1810.cbf
-   22   CBF  TBZ https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2 s01f3600.cbf
+   1    CBF  TBZ http://127.0.0.1:8001/b4_mini.tar.bz2 s01f0001.cbf
+   2    CBF  TBZ http://127.0.0.1:8001/b4_mini.tar.bz2 s01f0002.cbf
+   3    CBF  TBZ http://127.0.0.1:8001/b4_mini.tar.bz2 s01f0003.cbf
 
     loop_
       _diffrn_data_frame.id
@@ -122,32 +84,12 @@ _diffrn_radiation.type     'Synchrotron X-ray Source'
            1  1    1
            2  2    1
            3  3    1
-           4  4    1
-           5  5    1
-           6  6    1
-           7  7    1
-           8  8    1
-           9  9    1
-          10  10   1
-          11  11   1
-          12  12   1
-          13  13   1
-          14  14   1
-          15  15   1
-          16  16   1
-          17  17   1
-          18  18   1
-          19  19   1
-          20  20   1
-          21  21   1
-          22  22   1
-
 
     _diffrn_scan.id SCAN1
-    _diffrn_scan.frames                      22
+    _diffrn_scan.frames                      3
     _diffrn_scan_axis.axis_id                omega
     _diffrn_scan_axis.angle_start            0.0
-    _diffrn_scan_axis.angle_range            2.1
+    _diffrn_scan_axis.angle_range            0.2
     _diffrn_scan_axis.angle_increment        0.1
     _diffrn_scan_axis.displacement_start       0
     _diffrn_scan_axis.displacement_range       0
@@ -160,23 +102,3 @@ _diffrn_radiation.type     'Synchrotron X-ray Source'
            1  SCAN1    1
            2  SCAN1    2
            3  SCAN1    3
-           4  SCAN1    4
-           5  SCAN1    5
-           6  SCAN1    6
-           7  SCAN1    7
-           8  SCAN1    8
-           9  SCAN1    9
-          10  SCAN1   10
-          11  SCAN1   11
-          12  SCAN1   12
-          13  SCAN1   13
-          14  SCAN1   14
-          15  SCAN1   15
-          16  SCAN1   16
-          17  SCAN1   17
-          18  SCAN1   18
-          19  SCAN1   19
-          20  SCAN1   20
-          21  SCAN1   21
-          22  SCAN1   22
-      

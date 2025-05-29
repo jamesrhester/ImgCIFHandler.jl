@@ -5,21 +5,22 @@ end
 
 # Archive types
 """
-In order to access images, an archive must be specified,
-and then supplied to the `imgload` routine. To avoid
-re-downloading on each call, this archive should be
-created separately.
+In order to access images, an archive must be supplied
+to the `imgload` routine.
 
 An archive is either remote, or local. A local archive may
 have a remote equivalent, such that it is a cached version.
-We provide routines to convert from remote to local, which
-involves downloading selected files.
+
+All archives must support the `local_equivalent` method,
+to supply the cached local location of the referenced
+frame, and the `download_images_os` method, to return
+a specified frame.
 """
 abstract type ImageArchive end
 
 """
-A `BulkArchive` consists of a single file containing all image
-frames.
+A `BulkArchive` consists of a single file containing
+multiple image frames.
 """
 abstract type BulkArchive <: ImageArchive end
 
@@ -45,14 +46,18 @@ end
 
 # Zip archives are defined separately
 
-struct HDFArchive <: BulkArchive
+"""
+When frames are not bundled into a separate archive format, we have
+a directory archive.
+"""
+struct DirectoryArchive <: AddressableArchive
     local_cache::AbstractString
     original_url::URI
 end
 
-HDFArchive(local_dir, all_urls::Vector{URI}) = begin
+DirectoryArchive(local_dir, all_urls::Vector{URI}) = begin
 
-    HDFArchive(local_dir, get_constant_part(all_urls))
+    DirectoryArchive(local_dir, get_constant_part(all_urls))
         
 end
 
@@ -74,9 +79,6 @@ create_archives(c::CifContainer; subs = Dict()) = begin
 
     cat_name = "_array_data_external_data"
     arch_type = haskey(c, "$cat_name.archive_format") ? unique(c["$cat_name.archive_format"]) : nothing
-    if arch_type === nothing
-        arch_type = unique(c["$cat_name.format"])
-    end
     
     dl_info = unique(c["$cat_name.uri"])
     test_uris = URI.(dl_info)
@@ -130,24 +132,36 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
     end
 
     if arch_type in ("TBZ","TGZ","TXZ","TAR")
+
         for (one_uri, bd) in zip(uq_u, base_dirs)
             push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri))
         end
         return arch_list
+
     end
 
-    if arch_type == "HDF5"
-        const_part = "$(get_constant_part(u))"
-        if const_part in keys(subs)
-            @debug "Found local sub:" subs[const_part]
-            base_dir = subs[const_part]
-        else
-            @debug "$const_part not in subs list" keys(subs)
-            base_dir = base_dirs[1]
-        end
+    if arch_type == nothing
 
-        return [HDFArchive(base_dir, u)]
+        if first(u).scheme == "file" || first(u).scheme == ""
+
+            # No need to cache at all
+            
+            return [LocalArchive(root_dir)]
+
+        else
+
+            const_part = "$(get_constant_part(u))"
+            if const_part in keys(subs)
+                @debug "Found local sub:" subs[const_part]
+                base_dir = subs[const_part]
+            else
+                @debug "$const_part not in subs list" keys(subs)
+                base_dir = base_dirs[1]
+            end
+
+            return [DirectoryArchive(base_dir, u)]
     
+        end
     end
     
     if arch_type == "ZIP"
@@ -156,28 +170,8 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
         end
         return arch_list
     end
-    
-    # "file" schemes pointing to compressed archives are covered by
-    # the types above. Do not mix schemes.
-
-    if first(u).scheme == "file" || first(u).scheme == ""
-        return [LocalArchive(root_dir)]
-    end
-
-    if first(u).scheme == "rsync"
-        const_part = "$(get_constant_part(u))"
-        if const_part in keys(subs)
-            @debug "Found local sub:" subs[const_part]
-            base_dir = subs[const_part]
-        else
-            @debug "$const_part not in subs list" keys(subs)
-            base_dir = base_dirs[1]
-        end
         
-        return [RsyncArchive(base_dir, u)]
-    end
-    
-    throw(error("Unrecognised archive type or URI scheme $arch_type, $u"))
+    throw(error("Unrecognised archive type $arch_type"))
 end
 
 create_archives(u::URI; kwargs...) = create_archives([u]; kwargs...)
@@ -194,24 +188,6 @@ get_local_dir(a::BulkArchive) = a.local_cache
 
 struct LocalArchive <: AddressableArchive
     root_dir::String    #For relative URIs
-end
-
-"""
-An RsyncArchive corresponds to a dataset for which each
-frame is addressable through a unique rsync: URL. 
-`original_url` in this case corresponds to the longest
-unique part of the URL, and this is replaced by
-`local_directory` in the local filesystem.
-"""
-struct RsyncArchive <: AddressableArchive
-    local_directory::AbstractString
-    original_url::URI
-end
-
-RsyncArchive(local_dir, all_urls::Vector{URI}) = begin
-
-    RsyncArchive(local_dir, get_constant_part(all_urls))
-        
 end
 
 # Getting an image from an archive
@@ -258,32 +234,60 @@ download_images_os(a::TarArchive, ext_info) = begin
 end
 
 """
-    download_images_os(a::RsyncArchive, ext_info)
+    download_images_os(a::DirectoryArchive, ext_info)
 
-As rsync takes care of checking if the local version is equivalent,
-we do not need to keep track ourselves. But we do to save rsync
-calls.
+This will not check for local existence of the file, so check
+using `has_local_version` before calling this.
 """
-download_images_os(a::RsyncArchive, ext_info) = begin
+download_images_os(a::DirectoryArchive, ext_info; max_down=2e7) = begin
 
     c = get_prefix(ext_info)
 
-    # SBGRID does not download the full directory hierarchy
-    # from the URL, therefore we insert a "." so that we can
-    # control it
-
+    ext_scheme = a.original_url.scheme
+    
     aurl = "$(a.original_url)"
     for r in eachrow(ext_info)
+
         full_uri = "$(getproperty(r,"$(c)uri"))"
         if !startswith("$full_uri", aurl)
             throw(error("Asked to download from $full_uri but archive is for $aurl"))
         end
-        download_uri = joinpath(aurl,".",full_uri[(length(aurl)+2):end])
-        @debug "Rsync download address" download_uri
-        run(`rsync -avR $download_uri $(a.local_directory)`)
+        
+        if ext_scheme == "rsync"
 
-        #verify
+            # SBGRID does not download the full directory hierarchy
+            # from the URL, therefore we insert a "." so that we can
+            # control it
+
+            download_uri = joinpath(aurl,".",full_uri[(length(aurl)+2):end])
+
+            @debug "Rsync download address" download_uri
+            run(`rsync -avR $download_uri $(a.local_directory)`)
+
+        elseif ext_scheme in ("https", "http")
+
+            r = request(full_uri)
+            fs = get_file_size(r)
+        
+            if fs == 0 && max_down > 0
+
+                throw(error("Cannot determine file size for $uri. Download manually and use -l or -s options"))
+                
+            elseif fs > max_down
+
+                throw(error("$uri size $fs exceeds maximum download limit of $max_down, please use -m option or download manually and use -l / -s options"))
+            end
+        
+            @debug "Downloading $(local_equivalent(a, ei)) from $uri"
+            
+            Downloads.download(full_uri, output = local_equivalent(a, r))
+        else
+            throw(error("Unrecognised URI scheme $ext_scheme"))
+        end
+
+        # Sanity check
         @assert ispath(local_equivalent(a, r))
+            
     end
 
 end
@@ -398,32 +402,24 @@ local_equivalent(a::LocalArchive, ext_info) = begin
 end
 
 """
-    local_equivalent(a::RsyncArchive, ext_info)
+    local_equivalent(a::DirectoryArchive, ext_info)
 
 The local file name corresponding to the information provided in `ext_info`.
-Note we use rsync -avR to preserve the directory hierarchy.
 """
-local_equivalent(a::RsyncArchive, ext_info) = begin
 
-    c = get_prefix(ext_info)
-    u = URI(getproperty(ext_info,"$(c)uri"))
-    base_part = "$(a.original_url)"
-    unique_part = "$u"[length(base_part)+2:end]
-    base = joinpath(a.local_directory, unique_part)
-    if "$(c)file_compression" in names(ext_info)
-        return base * "_final"
-    else
-        return base
-    end
-end
-
-local_equivalent(a::HDFArchive, ext_info) = begin
+local_equivalent(a::DirectoryArchive, ext_info) = begin
 
     c = get_prefix(ext_info)
     u = URI(getproperty(ext_info,"$(c)uri"))
     base_part = "$(a.original_url)"
     unique_part = "$u"[length(base_part)+2:end]
     base = joinpath(a.local_cache, unique_part)
+    if "$(c)file_compression" in names(ext_info)
+        return base * "_final"
+    else
+        return base
+    end
+
 end
 
 """
@@ -447,6 +443,7 @@ has_local_version(a::ImageArchive, ext_info) = begin
 end
 
 #===== Image loading =====#
+
 """
     imgload(c::Block,array_ids, a::ImageArchive)
 
@@ -621,26 +618,17 @@ peek_image(a::LocalArchive, cif_block::CifContainer; kwargs...) = begin
 end
 
 """
-    peek_image(a::RsyncArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true)
+    peek_image(a::DirectoryArchive, cif_block::CifContainer; entry_no=0, check_name=true, extract=true)
 
 Find the name of an image in `a`.
 """
-peek_image(a::RsyncArchive, cif_block::CifContainer; kwargs...) = begin
-
-    # For an Rsync archive, some files are automatically present
-    # locally; all we need to do is find the first one in cif_block
-    # that matches a local file
+peek_image(a::DirectoryArchive, cif_block::CifContainer; kwargs...) = begin
 
     c = "_array_data_external_data"
     if haskey(cif_block,"$c.id")
         r = first(get_loop(cif_block, "$c.id"))
         if !has_local_version(a, r)
-            aurl = "$(a.original_url)"
-            full_uri = getproperty(r, "$(c).uri")
-            download_uri = joinpath(aurl, ".", full_uri[(length(aurl)+2):end])
-            rscmd = Cmd(`rsync -avR $download_uri $(a.local_directory)`)
-            @debug "Obtaining file..." rscmd
-            run(rscmd)
+            download_images_os(a, r)
         end
         return local_equivalent(a, r)
     end
@@ -654,7 +642,6 @@ peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, 
     p = get_any_local(a, cif_block)
     if !isnothing(p) return p end
     
-
     cmd_list = Cmd[]
     uri = a.original_url
     
@@ -721,35 +708,6 @@ peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, 
     return joinpath(a.local_cache,fname)
 
 end
-
-peek_image(a::HDFArchive, cif_block::CifContainer; max_down = 2e7, kwargs...) = begin
-
-    ei = first(get_loop(cif_block, "_array_data_external_data.id"))
-    
-    if !has_local_version(a, ei)
-        
-        cmd_list = Cmd[]
-        uri = getproperty(ei,"_array_data_external_data.uri")
-
-        r = request(uri)
-        fs = get_file_size(r)
-        
-        if fs == 0
-
-            throw(error("Cannot determine file size for $uri. Download manually and use -l or -s options"))
-        elseif fs > max_down
-
-            throw(error("$uri size $fs exceeds maximum download limit of $max_down, please use -m option or download manually and use -l / -s options"))
-        end
-        
-        @debug "Downloading $(local_equivalent(a, ei)) from $uri"
-        
-        run(Cmd(`curl -s $uri --output $(local_equivalent(a, ei))`))
-    end
-    
-    return local_equivalent(a, ei)
-end
-
 
 get_file_size(r) = 0
 
