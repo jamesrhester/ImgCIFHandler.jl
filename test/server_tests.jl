@@ -4,7 +4,7 @@ using LiveServer
 
 fire_up_server() = begin
     serve_dir = joinpath(@__DIR__, "testfiles/test_cbf_unzipped")
-    @async LiveServer.serve(dir = serve_dir, port=8001)
+    @async LiveServer.serve(dir = serve_dir, port=8001, verbose=true)
 end
 
 prepare_cf() = begin
