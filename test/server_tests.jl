@@ -14,6 +14,7 @@ prepare_cf() = begin
 end
 
 fire_up_server()
+sleep(2)   #give server time to start
 
 @testset "http + TBZ" begin
     cf, la = prepare_cf()
