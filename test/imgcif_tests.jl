@@ -11,9 +11,9 @@ end
     println("$s,$f")
     @test s == "SCAN1" && f == 3
     bb = first(Cif(b4master_rem)).second
-    uri = "https://zenodo.org/record/5886687/files/cbf_b4_1.tar.bz2"
-    s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"s01f0014.cbf",bb)
-    @test s == "SCAN1" && f == 14
+    uri = "http://127.0.0.1:8001/b4_mini.tar.bz2"
+    s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"s01f0003.cbf",bb)
+    @test s == "SCAN1" && f == 3
     bb = first(Cif(multi_scan)).second
     uri = "https://zenodo.org/record/6365376/files/cbf_m0220c.tar.bz2"
     s,f = ImgCIFHandler.scan_frame_from_img_name(uri,"m0220c_02_0171.cbf",bb)

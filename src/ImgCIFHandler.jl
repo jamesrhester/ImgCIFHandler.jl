@@ -71,9 +71,9 @@ include("hdf_image.jl")
 include("cbf_image.jl")
 include("adsc_image.jl")
 include("kcd_image.jl")
+include("tiff_image.jl")
 include("imgcif.jl")
 include("recip.jl")
 include("zipfilemanager.jl")
-
 
 end

@@ -623,6 +623,7 @@ scan_frame_from_bin_id(bin_id,cif_block) = begin
     
     scan_loop = filter(row->row["_diffrn_scan_frame.frame_id"]==frame_id,
                        get_loop(cif_block,"_diffrn_scan_frame.frame_id"), view=true)
+
     if !haskey(cif_block,"_diffrn_scan.id")
         scan_id = nothing
     elseif length(cif_block["_diffrn_scan.id"])==1
