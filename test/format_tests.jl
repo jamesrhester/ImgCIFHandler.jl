@@ -17,7 +17,7 @@ end
 end
 
 @testset "Test TIFF file loading" begin
-    q = joinpath(@__DIR__, "testfiles/test_XRD322_1.tiff")
+    q = joinpath(@__DIR__, "testfiles/test_XRD285_3frames.tiff")
     x = imgload(q, Val(:TIFF))
     @test size(x) == (2048, 2048)
 end

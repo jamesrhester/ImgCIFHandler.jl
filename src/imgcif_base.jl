@@ -19,8 +19,9 @@ a specified frame.
 abstract type ImageArchive end
 
 """
-A `BulkArchive` consists of a single file containing
-multiple image frames.
+A `BulkArchive` consists of a single file requiring
+an `archive_path` to be specified in order to reference a
+particular frame. Includes TAR, HDF5.
 """
 abstract type BulkArchive <: ImageArchive end
 
@@ -29,7 +30,7 @@ abstract type CompressedTarArchive <: CompressedArchive end
 
 """
 In an `AddressableArchive` each frame can be referenced
-by an individual, unique URL
+by an individual, unique URL. There is no archive path.
 """ 
 abstract type AddressableArchive <: ImageArchive end
 
@@ -57,7 +58,14 @@ end
 
 DirectoryArchive(local_dir, all_urls::Vector{URI}) = begin
 
-    DirectoryArchive(local_dir, get_constant_part(all_urls))
+    gcp = get_constant_part(all_urls, must_be_dir = true)
+
+    # If there is only a single file containing all of the
+    # images, it shouldn't be included as the constant part
+
+    @assert isdir(local_dir)
+    
+    DirectoryArchive(local_dir, gcp)
         
 end
 
@@ -106,7 +114,13 @@ create_archives(c::CifContainer; subs = Dict()) = begin
     elseif !isnothing(arch_type)
         arch_type = arch_type[]
     end
-        
+
+    # HDF5 is both an archive type (it has internal paths) and a format
+
+    if isnothing(arch_type) && "HDF5" in c["$cat_name.format"]
+        arch_type = "HDF5"
+    end
+    
     create_archives(test_uris; arch_type = arch_type, subs = subs, root_dir = "$(dirname(c.original_file))")
     
 end
@@ -117,29 +131,47 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
 
     uq_u = unique(u)
 
-    base_dirs = map(uq_u) do one_uri
-        if one_uri in keys(subs)
-            @debug "Found local sub" subs[one_uri]
-            subs[one_uri]
-        elseif "Universal" in keys(subs)
-            subs["Universal"]
-        else
-            if !isempty(subs)
-                @warn "No local substitute for $one_uri found"
+    if arch_type in ("TBZ","TGZ","TXZ","TAR","ZIP","HDF5")
+
+        # These archives have internal paths and so a URL can point to a
+        # file which is then further unpacked. In this case the local
+        # equivalent in `subs` points to a directory, which corresponds to the
+        # archive top level
+        
+        base_dirs = get_substitute_dirs(uq_u, subs)
+        
+        if arch_type == "ZIP"
+            
+            for (one_uri, bd) in zip(uq_u, base_dirs)
+                push!(arch_list, ZipArchive(bd, one_uri))
             end
-            mktempdir()
+            return arch_list
+
+        elseif arch_type == "HDF5"
+            
+            for (one_uri, bd) in zip(uq_u, base_dirs)
+                push!(arch_list, HDFArchive(bd, one_uri))
+            end
+            return arch_list
+            
+        else
+            for (one_uri, bd) in zip(uq_u, base_dirs)
+                push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri))
+            end
+            return arch_list
         end
+
     end
 
-    if arch_type in ("TBZ","TGZ","TXZ","TAR")
+    # Remaining types are addressable so we treat subs and
+    # directories slightly differently. A sub now always
+    # refers to a directory, even if a URL points to a
+    # file (eg if there is only one file for the whole
+    # dataset, containing all frames).
 
-        for (one_uri, bd) in zip(uq_u, base_dirs)
-            push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri))
-        end
-        return arch_list
-
-    end
-
+    # There will only be a single ImageArchive with all files
+    # in the same spot.
+    
     if arch_type == nothing
 
         if first(u).scheme == "file" || first(u).scheme == ""
@@ -150,31 +182,44 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
 
         else
 
-            const_part = "$(get_constant_part(u))"
-            if const_part in keys(subs)
-                @debug "Found local sub:" subs[const_part]
-                base_dir = subs[const_part]
-            else
-                @debug "$const_part not in subs list" keys(subs)
-                base_dir = base_dirs[1]
-            end
-
-            return [DirectoryArchive(base_dir, u)]
+            # Subs must be directories
+            
+            base_dirs = get_substitute_dirs(uq_u, subs, single_dir = true)
+ 
+            return [DirectoryArchive(base_dirs[], u)]
     
         end
     end
-    
-    if arch_type == "ZIP"
-        for (one_uri, bd) in zip(uq_u, base_dirs)
-            push!(arch_list, ZipArchive(bd, one_uri))
-        end
-        return arch_list
-    end
-        
+            
     throw(error("Unrecognised archive type $arch_type"))
 end
 
 create_archives(u::URI; kwargs...) = create_archives([u]; kwargs...)
+
+get_substitute_dirs(u::Vector{URI}, subs; single_dir = false) = begin
+
+    all_uris = u
+    
+    if single_dir
+        all_uris = [get_constant_part(u, must_be_dir = true)]
+        @debug "Single URI is $all_uris" subs
+    end
+
+    base_dirs = map(all_uris) do one_uri
+        if "$one_uri" in keys(subs)   #Hash not defined for URI
+            @debug "Found local sub" subs["$one_uri"]
+            subs["$one_uri"]
+        elseif "Universal" in keys(subs)
+            subs["Universal"]
+        else
+            if !isempty(subs)
+                @warn "No local substitute for $one_uri found"
+            end
+            mktempdir()
+        end
+    end
+    return base_dirs
+end
 
 decomp_option(::TarArchive{T}) where {T} = begin
     @debug "Type parameter is" T
@@ -338,24 +383,36 @@ end
 """
     get_constant_part(v::Vector{URI})
 
-Return a URI formed from the constant part of the URIs listed in v
+Return a URI formed from the constant part of the URIs listed in v.
+If `must_be_dir` is true, any trailing filename is removed.
 """
-get_constant_part(v::Vector{URI}) = begin
+get_constant_part(v::Vector{URI}; must_be_dir = false) = begin
     
     # find unchanging portion of path
 
     new_path = v[1].path
     
     path_elements = map(x -> splitpath(x.path), v)
+    final_length = length(path_elements[1])
+    
     for pe in 1:length(path_elements[1])
         all_entries = [x[pe] for x in path_elements]
         if length(unique(all_entries)) == 1
             continue
         else
             new_path = joinpath(splitpath(v[1].path)[1:pe-1])
+            final_length = pe - 1
+            break
         end
     end
 
+    # We resolve to an actual object only if all URLs are the
+    # same, in which case we step back one and add "/".
+    
+    if must_be_dir == true && final_length == length(path_elements[1])
+        new_path = joinpath(splitpath(v[1].path)[1:final_length - 1]) * '/'
+    end
+        
     b = v[1]
     URI(scheme=b.scheme, host = b.host,
         path = new_path, fragment = b.fragment,
