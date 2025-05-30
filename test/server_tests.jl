@@ -4,7 +4,7 @@ using LiveServer
 
 fire_up_server() = begin
     serve_dir = joinpath(@__DIR__, "testfiles")
-    @async LiveServer.serve(dir = serve_dir, port=8001)
+    @async LiveServer.serve(dir = serve_dir, port=8001, verbose=true, debug=true)
 end
 
 prepare_cf() = begin
@@ -14,7 +14,7 @@ prepare_cf() = begin
 end
 
 fire_up_server()
-sleep(5)   #give server time to start
+sleep(1)   #give server time to start
 
 @testset "http + TBZ" begin
     cf, la = prepare_cf()

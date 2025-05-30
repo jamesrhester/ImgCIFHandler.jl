@@ -52,7 +52,7 @@ a directory archive.
 """
 struct DirectoryArchive <: AddressableArchive
     local_cache::AbstractString
-    original_url::URI
+    original_url::URI    #Constant part only
 end
 
 DirectoryArchive(local_dir, all_urls::Vector{URI}) = begin
@@ -364,6 +364,12 @@ get_constant_part(v::Vector{URI}) = begin
 
 end
 
+"""
+    local_equivalent(a::ImageArchive, ext_info)
+
+The local file name corresponding to the information provided in `ext_info`.
+This file is suitable for passing to `imgload`.
+"""
 local_equivalent(a::CompressedArchive, ext_info) = begin
     
     c = get_prefix(ext_info)
@@ -383,11 +389,6 @@ local_equivalent(a::CompressedArchive, ext_info) = begin
     return b
 end
 
-"""
-    local_equivalent(a::LocalArchive, ext_info)
-
-The local file name corresponding to the information provided in `ext_info`
-"""
 local_equivalent(a::LocalArchive, ext_info) = begin
     c = get_prefix(ext_info)
     base_part = URI(getproperty(ext_info,"$(c)uri")).path
@@ -401,19 +402,26 @@ local_equivalent(a::LocalArchive, ext_info) = begin
     end
 end
 
-"""
-    local_equivalent(a::DirectoryArchive, ext_info)
-
-The local file name corresponding to the information provided in `ext_info`.
-"""
-
 local_equivalent(a::DirectoryArchive, ext_info) = begin
 
     c = get_prefix(ext_info)
-    u = URI(getproperty(ext_info,"$(c)uri"))
+
+    base = a.local_cache
+
+    # Work out where the local directory structure starts
+
+    # May have URIs or strings in ext_info, so convert
+    # to string.
+    
+    u = "$(URI(getproperty(ext_info,"$(c)uri")))"
     base_part = "$(a.original_url)"
-    unique_part = "$u"[length(base_part)+2:end]
-    base = joinpath(a.local_cache, unique_part)
+    if length(u) > length(base_part)
+        unique_part = u[length(base_part)+2:end]
+        base = joinpath(a.local_cache, unique_part)
+    end
+
+    @debug "Constructed local path" u base_part base
+    
     if "$(c)file_compression" in names(ext_info)
         return base * "_final"
     else
@@ -425,14 +433,19 @@ end
 """
     local_equivalent(a::CompressedArchive)
 
-The local file name for the archive itself, if downloaded
-in full.
+The local file name for the entire archive.
 """
 local_equivalent(a::CompressedArchive) = begin
     lname = basename(a.original_url.path)
     return joinpath(get_local_dir(a), lname)
 end
 
+"""
+    has_local_version(a::ImageArchive, ext_info)
+
+Whether or not the frame referenced by `ext_info` is
+locally cached.
+"""
 has_local_version(a::ImageArchive, ext_info) = begin
     l = local_equivalent(a, ext_info)
     if isnothing(l)
@@ -624,6 +637,9 @@ Find the name of an image in `a`.
 """
 peek_image(a::DirectoryArchive, cif_block::CifContainer; kwargs...) = begin
 
+    p = get_any_local(a, cif_block)
+    if !isnothing(p) return p end
+    
     c = "_array_data_external_data"
     if haskey(cif_block,"$c.id")
         r = first(get_loop(cif_block, "$c.id"))

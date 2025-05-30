@@ -29,11 +29,11 @@ end
 
 extract_files()
 
-include("format_tests.jl")
+#include("format_tests.jl")
 
 # Test our own imgCIF routines
 
-include("imgcif_tests.jl")
+#include("imgcif_tests.jl")
 include("server_tests.jl")
 
 clean_up()

@@ -804,7 +804,7 @@ ignored (but must be provided)."
 
         "-l", "--local"
         nargs = 1
-        help = "Use the directory given in <local> in place of all URIs found in the file. This is the equivalent of -s when there is one URI. Useful if all URIs have been unpacked into directory <local>."
+        help = "Use the directory given in <local> in place of all URIs found in the file. This is the equivalent of -s when there is one URI. Useful if all URIs have been unpacked into directory <local>. For non-archive URLs, this directory is mapped to the common part of all URLs listed in the imgCIF file."
         
         "--skip"
         nargs = 0
