@@ -5,9 +5,9 @@
 end
 
 @testset "Test HDF5 file loading" begin
-    q = joinpath(@__DIR__,"testfiles/simple3D.h5")
-    x = imgload(q,Val(:HDF5),path="/entry/data/test",frame=1)
-    @test size(x) == (4,3)
+    q = joinpath(@__DIR__,"testfiles/_b4_three_frames.h5")
+    x = imgload(q,Val(:HDF5),path="/data",frame=1)
+    @test size(x) == (101,202)
 end
 
 @testset "Test ADSC file loading" begin

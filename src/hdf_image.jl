@@ -33,7 +33,7 @@ https://portal.hdfgroup.org/display/support/HDF5+Filter+Plugins
 
 BZIP2, LZF, BLOSC, MAFISC, LZ4, Bitshuffle, and ZFP
 """
-const allowed_filters = (307,32000,32001,32002,32004,32008,32013)
+const allowed_filters = (32000,32001,32002,32004,32008,32013)
 
 """
     check_format(loc::AbstractString, Val{:HDF5};path="/",frame=1)
@@ -51,7 +51,10 @@ check_format(loc::AbstractString, ::Val{:HDF5};path="/",frame=1) = begin
         else
             filter_id = HDF5.Filters.filterid(typeof(filt))
         end
-        if !(filter_id in allowed_filters)
+
+        # IDs 0 - 255 are maintained by HDF5 group as part of core HDF5 library
+        
+        if filter_id > 255 && !(filter_id in allowed_filters)
             messages *= "\nFilter ID $(filter_id) used in $loc/$path is not allowed\n"
         end
     end

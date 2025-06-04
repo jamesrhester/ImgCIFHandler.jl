@@ -39,6 +39,7 @@ using ImageBinarization
 using ImageFiltering
 using Statistics
 using Rotations
+using Downloads
 
 export create_archives  #register an archive
 export imgload         #Load raw data

@@ -66,7 +66,7 @@ using `insecure` keyword to allow non-SSL connections"))
         # Now download the full end of the zip file
 
         seek(io, 0)
-        req = request(real_url, headers=["Range" => "bytes=$cdir-"], output = io)
+        req = request(real_url, headers=["Range" => "bytes=$cdir-$(full_size - 1)"], output = io)
 
         @debug "Result of central directory request" req
         
@@ -166,6 +166,10 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
 
         start, file_len = get_file_offset(a, path_in_arch)
 
+        # File len is that according to the central directory. We have observed lengths that
+        # do not exactly correspond, so we process the local directory before passing the
+        # final chunk to the deflator.
+
         if start < 0
             throw(error("File $path_in_arch not found in $uri"))
         end
@@ -175,8 +179,19 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
                        output = io)
 
         @debug "Obtained compressed chunk" resp
-        
-        zip_deflate(io, 0, file_len, local_equivalent(a, ei))
+
+        new_file_len = zip_deflate(io, 0, file_len, local_equivalent(a, ei))
+        if new_file_len > file_len   #local directory contradicts us!
+
+            # We could be fancy and just download the missing bytes
+            
+            io = IOBuffer()
+            resp = request("$(get_real_url(a))", headers = ["Range" => "bytes=$start-$(start+new_file_len)"],
+                           output = io)
+
+            @debug "Re-downloaded with correct length" resp
+            zip_deflate(io, 0, new_file_len, local_equivalent(a, ei))
+        end
     end
         
     return local_equivalent(a, ei)
@@ -278,7 +293,9 @@ end
 
 """
     Extract information from the central directory. The file length
-returned includes header information.
+returned includes header information. We have observed that nlen
+might be different for the local header and the central directory
+header.
 """
 interpret_cdfh(io::IO, offset, num_entries) = begin
 
@@ -310,7 +327,6 @@ get_zip_file_entry(io::IO, offset) = begin
         
         throw(error("Incorrect offset for file entry: $offset $sig"))
     end
-
     
     seek(io, offset + 20)
     comp_len = readle(io, UInt32)
@@ -324,6 +340,8 @@ get_zip_file_entry(io::IO, offset) = begin
     fname = transcode(String, read(io, nlen))
     next_entry = offset + 46 + nlen + mlen + klen
     chunk_len = 30 + nlen + mlen + comp_len
+
+    @debug "For $fname:" Int64(file_loc) Int64(comp_len) chunk_len nlen mlen klen
     return fname, file_loc, chunk_len, next_entry
 
 end
@@ -369,9 +387,16 @@ zip_deflate(io::IO, offset, chunk_len, dest_file) = begin
     if comp_size == 0    #didn't know at time of writing
         comp_size = chunk_len -30 - nlen - mlen
     end
+
+    predicted_size = comp_size + 30 + nlen + mlen
+    if predicted_size != chunk_len
+
+        @debug "Contradictory chunk sizes: $predicted_size $chunk_len"
+        return predicted_size
+    end
     
     @debug "Decomp $fname starting at $(offset + 30 + nlen + mlen)" decomp_type Int64(decomp_size) Int64(comp_size) Int64(nlen) Int64(mlen)
-    
+
     seek(io, offset + 30 + nlen + mlen)
 
     df = open(dest_file, "w")
@@ -392,6 +417,7 @@ zip_deflate(io::IO, offset, chunk_len, dest_file) = begin
 
     write(df, read(g))
     close(df)
+    return chunk_len
 end
 
 # Copied from ZipArchive.jl

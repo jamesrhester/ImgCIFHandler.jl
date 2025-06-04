@@ -69,7 +69,7 @@ DirectoryArchive(local_dir, all_urls::Vector{URI}) = begin
         
 end
 
-create_archives(c::Cif; kwargs...) = create_archive(first(c).second; kwargs...)
+create_archives(c::Cif; kwargs...) = create_archives(first(c).second; kwargs...)
 
 """
     create_archives(c::CifContainer; subs = Dict())
@@ -114,12 +114,6 @@ create_archives(c::CifContainer; subs = Dict()) = begin
     elseif !isnothing(arch_type)
         arch_type = arch_type[]
     end
-
-    # HDF5 is both an archive type (it has internal paths) and a format
-
-    if isnothing(arch_type) && "HDF5" in c["$cat_name.format"]
-        arch_type = "HDF5"
-    end
     
     create_archives(test_uris; arch_type = arch_type, subs = subs, root_dir = "$(dirname(c.original_file))")
     
@@ -131,7 +125,7 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
 
     uq_u = unique(u)
 
-    if arch_type in ("TBZ","TGZ","TXZ","TAR","ZIP","HDF5")
+    if arch_type in ("TBZ","TGZ","TXZ","TAR","ZIP")
 
         # These archives have internal paths and so a URL can point to a
         # file which is then further unpacked. In this case the local
@@ -147,13 +141,6 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
             end
             return arch_list
 
-        elseif arch_type == "HDF5"
-            
-            for (one_uri, bd) in zip(uq_u, base_dirs)
-                push!(arch_list, HDFArchive(bd, one_uri))
-            end
-            return arch_list
-            
         else
             for (one_uri, bd) in zip(uq_u, base_dirs)
                 push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri))
@@ -206,7 +193,7 @@ get_substitute_dirs(u::Vector{URI}, subs; single_dir = false) = begin
     end
 
     base_dirs = map(all_uris) do one_uri
-        if "$one_uri" in keys(subs)   #Hash not defined for URI
+        if "$one_uri" in keys(subs)   #Hash not defined for URI so use strings
             @debug "Found local sub" subs["$one_uri"]
             subs["$one_uri"]
         elseif "Universal" in keys(subs)
@@ -218,6 +205,7 @@ get_substitute_dirs(u::Vector{URI}, subs; single_dir = false) = begin
             mktempdir()
         end
     end
+
     return base_dirs
 end
 
@@ -307,25 +295,25 @@ download_images_os(a::DirectoryArchive, ext_info; max_down=2e7) = begin
             download_uri = joinpath(aurl,".",full_uri[(length(aurl)+2):end])
 
             @debug "Rsync download address" download_uri
-            run(`rsync -avR $download_uri $(a.local_directory)`)
+            run(`rsync -avR $download_uri $(a.local_cache)`)
 
         elseif ext_scheme in ("https", "http")
 
-            r = request(full_uri)
-            fs = get_file_size(r)
+            req = request(full_uri)
+            fs = get_file_size(req)
         
             if fs == 0 && max_down > 0
 
-                throw(error("Cannot determine file size for $uri. Download manually and use -l or -s options"))
+                throw(error("Cannot determine file size for $full_uri. Download manually and use -l or -s options"))
                 
             elseif fs > max_down
 
-                throw(error("$uri size $fs exceeds maximum download limit of $max_down, please use -m option or download manually and use -l / -s options"))
+                throw(error("$full_uri size $fs exceeds maximum download limit of $max_down, please use -m option or download manually and use -l / -s options"))
             end
         
-            @debug "Downloading $(local_equivalent(a, ei)) from $uri"
+            @debug "Downloading $(local_equivalent(a, r)) from $full_uri"
             
-            Downloads.download(full_uri, output = local_equivalent(a, r))
+            Downloads.download(full_uri, local_equivalent(a, r))
         else
             throw(error("Unrecognised URI scheme $ext_scheme"))
         end
@@ -410,7 +398,11 @@ get_constant_part(v::Vector{URI}; must_be_dir = false) = begin
     # same, in which case we step back one and add "/".
     
     if must_be_dir == true && final_length == length(path_elements[1])
-        new_path = joinpath(splitpath(v[1].path)[1:final_length - 1]) * '/'
+        new_path = joinpath(splitpath(v[1].path)[1:final_length - 1])
+        if new_path[end] != '/'
+            new_path *= '/'
+        end
+        
     end
         
     b = v[1]
@@ -459,7 +451,7 @@ local_equivalent(a::LocalArchive, ext_info) = begin
     end
 end
 
-local_equivalent(a::DirectoryArchive, ext_info) = begin
+local_equivalent(a::DirectoryArchive, ext_info::DataFrameRow) = begin
 
     c = get_prefix(ext_info)
 
@@ -473,7 +465,12 @@ local_equivalent(a::DirectoryArchive, ext_info) = begin
     u = "$(URI(getproperty(ext_info,"$(c)uri")))"
     base_part = "$(a.original_url)"
     if length(u) > length(base_part)
-        unique_part = u[length(base_part)+2:end]
+        div_char = u[length(base_part)+1]
+        if div_char == '/'
+            unique_part = u[length(base_part)+2:end]
+        else
+            unique_part = u[length(base_part)+1:end]
+        end
         base = joinpath(a.local_cache, unique_part)
     end
 
@@ -569,7 +566,7 @@ imgload(a::ImageArchive, ext_info::DataFrame) = begin
 
     can_load = check_format(temp_locals[1],Val(Symbol(ext_info.format[1]));path=path,frame=frame)
     if !can_load[1]
-        return can_load[2]
+        throw(error(can_load[2]))
     end
     final_image = imgload(temp_locals[1],Val(Symbol(ext_info.format[1]));path=path,frame=frame)
     for fr_no in 2:size(ext_info,1)
@@ -699,11 +696,11 @@ peek_image(a::DirectoryArchive, cif_block::CifContainer; kwargs...) = begin
     
     c = "_array_data_external_data"
     if haskey(cif_block,"$c.id")
-        r = first(get_loop(cif_block, "$c.id"))
-        if !has_local_version(a, r)
+        r = get_loop(cif_block, "$c.id")[1:1,:]
+        if !has_local_version(a, first(r))
             download_images_os(a, r)
         end
-        return local_equivalent(a, r)
+        return local_equivalent(a, first(r))
     end
     
 end
