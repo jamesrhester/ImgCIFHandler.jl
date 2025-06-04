@@ -1,0 +1,116 @@
+#\#CIF_2.0
+
+##########################################################################
+#               Crystallographic Information Format file
+#               Produced by PyCifRW module
+#
+#  This is a CIF file.  CIF has been adopted by the International
+#  Union of Crystallography as the standard for data archiving and
+#  transmission.
+#
+#  For information on this file format, follow the CIF links at
+#  http://www.iucr.org
+##########################################################################
+
+data_973
+
+_database.dataset_doi                   ''
+_audit.block_code                       19ID_APS
+_diffrn_source.beamline                 19ID
+_diffrn_source.facility                 APS
+_diffrn.ambient_temperature             0
+_diffrn_radiation.type                  x-ray
+_array_intensities.overload             65535
+loop_
+  _diffrn_radiation_wavelength.id
+  _diffrn_radiation_wavelength.value
+         1         0.9793453 
+loop_
+  _axis.id
+  _axis.type
+  _axis.equipment
+  _axis.depends_on
+  _axis.vector[1]
+  _axis.vector[2]
+  _axis.vector[3]
+  _axis.offset[1]
+  _axis.offset[2]
+  _axis.offset[3]
+         phi       rotation  goniometer          .         1         0         0        0        0        0        
+         dety      translation         detector  detx      0         -1        0        0        0        0        
+         detx      translation         detector  trans     1         0         0        -162.7         153.2       0        
+         trans     translation         detector  gravity   0         0         -1       0        0        0        
+         gravity   .         gravity   .         0         -1        0         0        0        0        
+         source    .         source    .         0         0         1         0        0        0
+loop_
+  _array_structure_list_axis.axis_id
+  _array_structure_list_axis.axis_set_id
+  _array_structure_list_axis.displacement
+  _array_structure_list_axis.displacement_increment
+         detx      1         0.0512    0.1024    
+         dety      2         0.0512    0.1024 
+loop_
+  _array_structure_list.array_id
+  _array_structure_list.index
+  _array_structure_list.axis_set_id
+  _array_structure_list.dimension
+  _array_structure_list.direction
+  _array_structure_list.precedence
+         1         1         1         3072      increasing          1         
+         1         2         2         3072      increasing          2 
+loop_
+  _diffrn_detector.id
+  _diffrn_detector.number_of_axes
+         det1      1 
+loop_
+  _diffrn_detector_axis.axis_id
+  _diffrn_detector_axis.detector_id
+         trans     det1 
+loop_
+  _diffrn_scan_axis.scan_id
+  _diffrn_scan_axis.axis_id
+  _diffrn_scan_axis.displacement_start
+  _diffrn_scan_axis.displacement_increment
+  _diffrn_scan_axis.displacement_range
+  _diffrn_scan_axis.angle_start
+  _diffrn_scan_axis.angle_increment
+  _diffrn_scan_axis.angle_range
+         SCAN01    phi       .         .         .         -45.0     1.0       90.0     
+         SCAN01    trans     499.96    0         0         .         .         .
+loop_
+  _diffrn_scan.id
+  _diffrn_scan.frame_id_start
+  _diffrn_scan.frame_id_end
+  _diffrn_scan.frames
+         SCAN01    frm1      frm90     90 
+loop_
+  _diffrn_scan_frame.frame_id
+  _diffrn_scan_frame.scan_id
+  _diffrn_scan_frame.frame_number
+  _diffrn_scan_frame.integration_time
+         frm1      SCAN01    1         2.0       
+         frm2      SCAN01    2         2.0       
+         frm3      SCAN01    3         2.0       
+
+loop_
+  _diffrn_data_frame.id
+  _diffrn_data_frame.detector_element_id
+  _diffrn_data_frame.array_id
+  _diffrn_data_frame.binary_id
+         frm1      ELEMENT01           IMAGE01   1         
+         frm2      ELEMENT01           IMAGE01   2         
+         frm3      ELEMENT01           IMAGE01   3         
+loop_
+  _array_data.array_id
+  _array_data.binary_id
+  _array_data.external_data_id
+         IMAGE01   1         ext1      
+         IMAGE01   2         ext2      
+         IMAGE01   3         ext3      
+loop_
+  _array_data_external_data.id
+  _array_data_external_data.format
+  _array_data_external_data.uri
+         ext1      SMV       rsync://localhost:10873/files/PNP545.0001.img          
+         ext2      SMV       rsync://localhost:10873/files/PNP545.0002.img          
+         ext3      SMV       rsync://localhost:10873/files/PNP545.0003.img          
