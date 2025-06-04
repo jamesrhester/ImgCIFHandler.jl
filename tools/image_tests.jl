@@ -676,12 +676,16 @@ end
 """
 generate_peak_check(incif; peakvals = [], cached = [], grid = [1, 0]) = begin
 
-    detx_row = indexin(["detx", "ele1_x"], incif["_axis.id"])
+    fast_name, slow_name = get_surface_axes(incif)
+
+    detx_row = indexin([fast_name], incif["_axis.id"])
     if isnothing(detx_row[1])
-        detx_row = detx_row[2]
-    else
-        detx_row = detx_row[1]
+        throw(error("No axis named $fast_name found in axis list but a detector axis
+has this name"))
     end
+
+    detx_row = detx_row[]
+    
     x_offset = parse(Float64, incif["_axis.offset[1]"][detx_row])
     y_offset = parse(Float64, incif["_axis.offset[2]"][detx_row])
 
