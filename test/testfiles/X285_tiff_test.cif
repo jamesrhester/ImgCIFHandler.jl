@@ -1,0 +1,120 @@
+#\#CIF_2.0
+# CIF converted from DIALS .expt file
+# Conversion routine version 0.1
+data_result
+
+_diffrn_radiation_wavelength.id    1
+_diffrn_radiation_wavelength.value 0.025079
+_diffrn_radiation.type             xray
+
+loop_
+ _axis.id
+ _axis.depends_on
+ _axis.equipment
+ _axis.type
+ _axis.vector[1]
+ _axis.vector[2]
+ _axis.vector[3]
+ _axis.offset[1]
+ _axis.offset[2]
+ _axis.offset[3]
+
+  Omega	.	goniometer	rotation	1.0	0.0	0.0	0.0	0.0	0.0
+  Trans	.	detector	translation	0	0	-1	0.0	0.0	0.0
+  ele1_fast	Trans	detector	translation	0.0	-1.0	0.0	28.307999999999986	28.000000000000007	0.0
+  ele1_slow	ele1_fast	detector	translation	-1.0	-0.0	0.0	0.0	0.0	0.0
+
+_diffrn_detector.id        DETECTOR
+_diffrn_detector.diffrn_id DIFFRN
+
+loop_
+ _diffrn_detector_element.id
+ _diffrn_detector_element.detector_id
+
+  ELEMENT1	DETECTOR
+
+loop_
+ _diffrn_detector_axis.detector_id
+ _diffrn_detector_axis.axis_id
+
+  DETECTOR	Trans
+
+loop_
+ _array_structure_list_axis.axis_id
+ _array_structure_list_axis.axis_set_id
+ _array_structure_list_axis.displacement
+ _array_structure_list_axis.displacement_increment
+
+  ele1_fast	1	0.014	0.028
+  ele1_slow	2	0.014	0.028
+
+loop_
+ _array_structure_list.array_id
+ _array_structure_list.axis_set_id
+ _array_structure_list.direction
+ _array_structure_list.index
+ _array_structure_list.precedence
+ _array_structure_list.dimension
+
+  1	1	increasing	1	1	2048
+  1	2	increasing	2	2	2048
+
+loop_
+ _diffrn_scan_axis.scan_id
+ _diffrn_scan_axis.axis_id
+ _diffrn_scan_axis.displacement_start
+ _diffrn_scan_axis.displacement_increment
+ _diffrn_scan_axis.displacement_range
+ _diffrn_scan_axis.angle_start
+ _diffrn_scan_axis.angle_increment
+ _diffrn_scan_axis.angle_range
+
+  SCAN01	Omega	.	.	.	0.00	0.44	63.57
+  SCAN01	Trans	777.50	0.0	0.0	.	.	.
+
+loop_
+ _diffrn_scan.id
+ _diffrn_scan.frame_id_start
+ _diffrn_scan.frame_id_end
+ _diffrn_scan.frames
+
+  SCAN01	frm1	frm3	3
+
+loop_
+ _diffrn_scan_frame.frame_id
+ _diffrn_scan_frame.scan_id
+ _diffrn_scan_frame.frame_number
+ _diffrn_scan_frame.integration_time
+
+  frm1	SCAN01	1	0.0
+  frm2	SCAN01	2	0.0
+  frm3	SCAN01	3	0.0
+
+loop_
+ _diffrn_data_frame.id
+ _diffrn_data_frame.detector_element_id
+ _diffrn_data_frame.array_id
+ _diffrn_data_frame.binary_id
+
+  frm1	ELEMENT	IMAGE	1
+  frm2	ELEMENT	IMAGE	2
+  frm3	ELEMENT	IMAGE	3
+
+loop_
+ _array_data.array_id
+ _array_data.binary_id
+ _array_data.external_data_id
+
+  IMAGE	1	1
+  IMAGE	2	2
+  IMAGE	3	3
+
+loop_
+ _array_data_external_data.id
+ _array_data_external_data.format
+ _array_data_external_data.uri
+ _array_data_external_data.frame
+
+  1	TIFF	http://127.0.0.1:8001/test_XRD285_3frames.tiff	1
+  2	TIFF	http://127.0.0.1:8001/test_XRD285_3frames.tiff	2
+  3	TIFF	http://127.0.0.1:8001/test_XRD285_3frames.tiff	3

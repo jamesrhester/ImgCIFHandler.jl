@@ -1,0 +1,111 @@
+# Test dataset to check image loading. Metadata is not likely to be correct
+data_5886687
+_database.dataset_doi       '10.5281/zenodo.5886687'
+_audit.block_code	            Diamond_I04
+_audit.update_record
+;
+2023-02-15
+Changed 'gravity' axis vector from [1 0 0] to [0 -1 0]
+to fix a typographic error introduced by IUCr Journals processing
+(sw@iucr.org)
+;
+_diffrn_source.beamline	    I04
+_diffrn_source.facility	    Diamond
+_diffrn_radiation.type      'Synchrotron X-ray Source'
+
+loop_
+    _diffrn_radiation_wavelength.id
+    _diffrn_radiation_wavelength.value
+        1          0.9794913928630679
+
+loop_
+    _axis.id
+    _axis.type
+    _axis.equipment
+    _axis.depends_on
+    _axis.vector[1]
+    _axis.vector[2]
+    _axis.vector[3]
+    _axis.offset[1]
+    _axis.offset[2]
+    _axis.offset[3]
+        phi        rotation     goniometer  chi        1.0  -0.0037  0.002       0.0 0.0 0.0
+        chi        rotation     goniometer  omega      -0.0046  0.0372  -0.9993  0.0 0.0 0.0
+        omega      rotation     goniometer  .          1.0  0.0  0.0             0.0 0.0 0.0
+        gravity    general   gravity     .   0.0 -1.0 0.0  0  0  0
+        two_theta  rotation     detector    .          1.0  0.0  0.0             0.0 0.0 0.0
+        trans      translation  detector    two_theta  0.0  0.0  -1.0            0.0 0.0 -287.2224260231453
+        detx       translation  detector    trans      1.0  0.0  0.0             -166.8735731239242 172.49715065384444 0.0
+        dety       translation  detector    detx       0.0  -1.0  0.0            0.0 0.0 0.0
+
+loop_
+    _array_structure_list_axis.axis_id
+    _array_structure_list_axis.axis_set_id
+    _array_structure_list_axis.displacement
+    _array_structure_list_axis.displacement_increment
+        detx        1         0.0375        0.075
+        dety        2         0.0375        0.075
+
+loop_
+    _array_structure_list.array_id
+    _array_structure_list.axis_set_id
+    _array_structure_list.direction
+    _array_structure_list.index
+    _array_structure_list.precedence
+    _array_structure_list.dimension
+        1          1          increasing    1        1       101
+        1          2          increasing    2        2       202
+        
+_array_intensities.overload   65535
+
+_diffrn_detector.id               det1
+_diffrn_detector.number_of_axes   1
+
+loop_
+    _diffrn_detector_axis.axis_id
+    _diffrn_detector_axis.detector_id
+        trans      det1
+
+loop_
+    _array_data.binary_id
+    _array_data.array_id
+    _array_data.external_data_id
+        1    1 ext1   
+        2    1 ext2   
+        3    1 ext3   
+loop_
+    _array_data_external_data.id
+    _array_data_external_data.format
+    _array_data_external_data.uri
+    _array_data_external_data.path
+    _array_data_external_data.frame
+        ext1    HDF5 http://127.0.0.1:8001/_b4_three_frames.h5 /data 1
+        ext2    HDF5 http://127.0.0.1:8001/_b4_three_frames.h5 /data 2
+        ext3    HDF5 http://127.0.0.1:8001/_b4_three_frames.h5 /data 3
+
+loop_
+    _diffrn_data_frame.id
+    _diffrn_data_frame.binary_id
+    _diffrn_data_frame.array_id
+        1     1    1
+        2     2    1
+        3     3    1
+
+_diffrn_scan.id                               SCAN1
+_diffrn_scan.frames                           3
+_diffrn_scan.integration_time 	              0.01
+_diffrn_scan_axis.axis_id                     omega
+_diffrn_scan_axis.angle_start                 0.0
+_diffrn_scan_axis.angle_range                 0.2
+_diffrn_scan_axis.angle_increment             0.1
+_diffrn_scan_axis.displacement_start          0.0
+_diffrn_scan_axis.displacement_range          0.0
+_diffrn_scan_axis.displacement_increment      0.0
+
+loop_
+    _diffrn_scan_frame.frame_id
+    _diffrn_scan_frame.scan_id
+    _diffrn_scan_frame.frame_number
+        1     SCAN1 1   
+        2     SCAN1 2   
+        3     SCAN1 3   
