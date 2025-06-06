@@ -43,6 +43,8 @@ to the `decomp_option` method.
 struct TarArchive{T} <: CompressedTarArchive
     local_cache::AbstractString
     original_url::URI
+    full::Bool
+    max_down::Int64
 end
 
 # Zip archives are defined separately
@@ -54,9 +56,12 @@ a directory archive.
 struct DirectoryArchive <: AddressableArchive
     local_cache::AbstractString
     original_url::URI    #Constant part only
+    full::Bool
+    max_down::Int64
+    
 end
 
-DirectoryArchive(local_dir, all_urls::Vector{URI}) = begin
+DirectoryArchive(local_dir, all_urls::Vector{URI}, full, max_down) = begin
 
     gcp = get_constant_part(all_urls, must_be_dir = true)
 
@@ -65,7 +70,7 @@ DirectoryArchive(local_dir, all_urls::Vector{URI}) = begin
 
     @assert isdir(local_dir)
     
-    DirectoryArchive(local_dir, gcp)
+    DirectoryArchive(local_dir, gcp, full, max_down)
         
 end
 
@@ -81,9 +86,11 @@ to a single directory. `subs` is an optional dictionary keyed by
 URL, where the value is an existing local directory containing the
 contents of that URL, uncompressed and with the same directory
 structure as the archive, so that archive_path can be used to access
-the image frame.
+the image frame. `full` is true if the whole archive should be immediately
+downloaded on first remote access, and `max_down` gives the maximum
+download size to attempt.
 """
-create_archives(c::CifContainer; subs = Dict()) = begin
+create_archives(c::CifContainer; subs = Dict(), kwargs...) = begin
 
     cat_name = "_array_data_external_data"
     arch_type = haskey(c, "$cat_name.archive_format") ? unique(c["$cat_name.archive_format"]) : nothing
@@ -115,11 +122,11 @@ create_archives(c::CifContainer; subs = Dict()) = begin
         arch_type = arch_type[]
     end
     
-    create_archives(test_uris; arch_type = arch_type, subs = subs, root_dir = "$(dirname(c.original_file))")
+    create_archives(test_uris; arch_type = arch_type, subs = subs, root_dir = "$(dirname(c.original_file))", kwargs...)
     
 end
 
-create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="") = begin
+create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="", full = false, max_down = 1e6) = begin
 
     arch_list = ImageArchive[]
 
@@ -137,13 +144,13 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
         if arch_type == "ZIP"
             
             for (one_uri, bd) in zip(uq_u, base_dirs)
-                push!(arch_list, ZipArchive(bd, one_uri))
+                push!(arch_list, ZipArchive(bd, one_uri, full = full, max_down = max_down))
             end
             return arch_list
 
         else
             for (one_uri, bd) in zip(uq_u, base_dirs)
-                push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri))
+                push!(arch_list, TarArchive{Val(Symbol(arch_type))}(bd, one_uri, full, max_down))
             end
             return arch_list
         end
@@ -173,7 +180,7 @@ create_archives(u::Vector{URI}; arch_type = nothing, subs = Dict(), root_dir="")
             
             base_dirs = get_substitute_dirs(uq_u, subs, single_dir = true)
  
-            return [DirectoryArchive(base_dirs[], u)]
+            return [DirectoryArchive(base_dirs[], u, full, max_down)]
     
         end
     end
@@ -225,11 +232,11 @@ end
 
 # Getting an image from an archive
 
-download_images_os(a::ImageArchive, ext_info) = begin
+download_images_os(a::ImageArchive, ext_info; kwargs...) = begin
     @warn "No image download defined for $(typeof(a))"
 end
 
-download_images_os(a::TarArchive, ext_info) = begin
+download_images_os(a::TarArchive, ext_info; kwargs...) = begin
 
     cmd_list = Cmd[]
     loc = get_local_dir(a)
@@ -237,9 +244,31 @@ download_images_os(a::TarArchive, ext_info) = begin
 
     @debug "For $ext_info need to get $need_to_get"
     if size(need_to_get, 1) > 0
-        arch_paths = need_to_get.archive_path
-        push!(cmd_list, Cmd(`curl -s --show-error $(ext_info.uri[1])`,ignorestatus=true))
+
+        c = get_prefix(ext_info)
+        
+        # do we have a copy of the archive already?
+
+        if !has_local_version(a)
+            if a.full  #just download the whole thing
+                fs = get_file_size(a)
+
+                @debug "Archive size $fs"
+                
+                if fs > a.max_down
+                    throw(error("Cannot download full archive $(a.original_url) as size $fs is greater than limit $(a.max_down)."))
+                end
+                Downloads.download("$(a.original_url)", local_equivalent(a))
+                push!(cmd_list, Cmd(`cat $(local_equivalent(a))`))
+            else
+                push!(cmd_list, Cmd(`curl -s --show-error $(a.original_url)`,ignorestatus=true))
+            end
+        else
+            push!(cmd_list, Cmd(`cat $(local_equivalent(a))`))
+        end
+        
         j = decomp_option(a)
+        arch_paths = getproperty(need_to_get,"$(c)archive_path")
         if !isnothing(j)
             push!(cmd_list, `tar -C $loc -x $j -f - --occurrence $arch_paths`)
         else
@@ -272,7 +301,7 @@ end
 This will not check for local existence of the file, so check
 using `has_local_version` before calling this.
 """
-download_images_os(a::DirectoryArchive, ext_info; max_down=2e7) = begin
+download_images_os(a::DirectoryArchive, ext_info) = begin
 
     c = get_prefix(ext_info)
 
@@ -302,13 +331,13 @@ download_images_os(a::DirectoryArchive, ext_info; max_down=2e7) = begin
             req = request(full_uri)
             fs = get_file_size(req)
         
-            if fs == 0 && max_down > 0
+            if fs == 0 && a.max_down > 0
 
                 throw(error("Cannot determine file size for $full_uri. Download manually and use -l or -s options"))
                 
-            elseif fs > max_down
+            elseif a.max_down > 0 && fs > a.max_down
 
-                throw(error("$full_uri size $fs exceeds maximum download limit of $max_down, please use -m option or download manually and use -l / -s options"))
+                throw(error("$full_uri size $fs exceeds maximum download limit of $(a.max_down)"))
             end
         
             @debug "Downloading $(local_equivalent(a, r)) from $full_uri"
@@ -506,6 +535,23 @@ has_local_version(a::ImageArchive, ext_info) = begin
         return true
     end
     @debug "Local path is" l
+    ispath(l)
+end
+
+"""
+    has_local_version(a::TarArchive)
+
+Whether or not the whole tar file associated with this archive
+has been locally cached.
+"""
+has_local_version(a::TarArchive) = begin
+
+    l = local_equivalent(a)
+    if isnothing(l)
+        return true
+    end
+
+    @debug "Local path for full archive is" l
     ispath(l)
 end
 
@@ -786,6 +832,17 @@ get_file_size(r::Response) = begin
     if "content-length" in keys(h)
         return parse(Int64, h["content-length"])
     end
+    return 0
+end
+
+get_file_size(a::TarArchive) = begin
+
+    scheme = a.original_url.scheme
+    if scheme in ("https", "http")   #only these for now
+        req = request("$(a.original_url)")
+        return get_file_size(req)
+    end
+
     return 0
 end
 

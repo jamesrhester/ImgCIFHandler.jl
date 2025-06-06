@@ -583,7 +583,7 @@ run_img_checks(incif;images=false,always=false,full=false,max_down=1,connected=f
 
     println("Testing presence of archive:")
 
-    local_archive = create_archives(incif, subs = subs)
+    local_archive = create_archives(incif, subs = subs, full = full, max_down = max_down)
 
     @debug "Created local archive" local_archive
 
@@ -604,7 +604,7 @@ run_img_checks(incif;images=false,always=false,full=false,max_down=1,connected=f
 
         # Choose image(s) to load
         
-        peek_image(first(local_archive), incif, max_down = max_down)
+        peek_image(first(local_archive), incif)
 
         load_id = find_load_id(incif, local_archive)
 
@@ -768,7 +768,7 @@ parse_cmdline(d) = begin
         help = "Check dictionary conformance only (-d option must be provided)"
         nargs = 0
         "-f", "--full-download"
-        help = "Fully download archive for image and archive checks (required for ZIP)"
+        help = "Fully download archive for image and archive checks (automatic for --peaks). As the archive will be deleted on exit, if multiple runs are anticipated it is better to separately download and then specify the download directory using -s and -l. If -s or -l are used, archives are not downloaded."
         nargs = 0
         "-m", "--max-download"
         help = "Maximum archive size to download automatically, in megabytes"
@@ -785,7 +785,7 @@ parse_cmdline(d) = begin
         help = "Use this entry number in the archive for checking"
         "--peaks"
         nargs = 0
-        help = "Generate a peak check image. Implies -f (full download). Suggest also using -s if a fully downloaded archive is locally available. See also option --peakval"
+        help = "Generate a peak check image. Implies -f (full download). Suggest instead using -s if a fully downloaded archive is locally available. See also option --peakval"
         "--peakval"
         nargs = 4
         metavar = ["scan","frame","fast","slow"]
@@ -804,7 +804,7 @@ ignored (but must be provided)."
         nargs = 2
         metavar = ["original","local"]
         action = "append_arg"
-        help = "Use <local> file in place of archive URI <original> (for testing). Use -f to access whole file. All URIs in <filename> must be provided, option may be used multiple times. If <local> is a directory, its contents are assumed to be the unpacked archive."
+        help = "Use <local> file in place of archive URI <original>. All URIs in <filename> must be provided, option may be used multiple times. If <local> is a directory, its contents are assumed to be the unpacked archive."
 
         "-l", "--local"
         nargs = 1
@@ -813,6 +813,9 @@ ignored (but must be provided)."
         "--skip"
         nargs = 0
         help = "Only check actual images"
+        "--html"
+        nargs = 0
+        help = "HTML output (not yet available)"
         "filename"
         help = "Name of imgCIF data file to check"
         required = true
@@ -845,8 +848,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
         subs[k] = abspath(expanduser(v))
     end
     
-    println("\n ImgCIF checker version 2025-03-07\n")
-    println("Checking block $blockname in $(incif.original_file)\n")
+    println("\n ImgCIF checker version 2025-06-05\n")
+    println("Checking block \"$blockname\" in $(incif.original_file)\n")
     println(now())
     if parsed_args["dictionary"] != [""]
     end

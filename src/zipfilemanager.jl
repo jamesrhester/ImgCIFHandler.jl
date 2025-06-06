@@ -7,6 +7,8 @@ struct ZipArchive <: CompressedArchive
     original_url::URI
     file_directory::Dict{String, Tuple{Int64, Int64}}
     insecure::Bool  #flag that original_url should be adjusted
+    full::Bool      #Download the full archive (ignored)
+    max_down::Int64  #Maximum download size to attempt (ignored)
 end
 
 """
@@ -15,7 +17,7 @@ end
 Create a ZipArchive instance. If `insecure` is true, allow
 downloading by ftp/http even if ftps/https was requested.
 """
-ZipArchive(local_cache::AbstractString, original_url::AbstractString; insecure = false) = begin
+ZipArchive(local_cache::AbstractString, original_url::AbstractString; full = false, max_down = 0, insecure = false) = begin
 
     if make_insecure(original_url) == original_url
         insecure = true
@@ -71,16 +73,16 @@ using `insecure` keyword to allow non-SSL connections"))
         @debug "Result of central directory request" req
         
         file_dir = interpret_cdfh(io, 0, num_entries)
-        ZipArchive(local_cache, URI(original_url), Dict(file_dir), use_insecure)
+        ZipArchive(local_cache, URI(original_url), Dict(file_dir), use_insecure, full, max_down)
     else
 
         @debug "No range headers supported"
         
-        ZipArchive(local_cache, URI(original_url), Dict(), insecure)
+        ZipArchive(local_cache, URI(original_url), Dict(), insecure, full, max_down)
     end
 end
 
-ZipArchive(local_cache, original_url; insecure = false) = ZipArchive("$local_cache", "$original_url", insecure = insecure)
+ZipArchive(local_cache, original_url; kwargs...) = ZipArchive("$local_cache", "$original_url"; kwargs...)
 
 get_real_url(a::ZipArchive) = a.insecure ? make_insecure(a.original_url) : a.original_url
 
