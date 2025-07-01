@@ -468,7 +468,7 @@ local_equivalent(a::CompressedArchive, ext_info) = begin
     if "file_compression" in names(ext_info)
         return b * "_final"
     end
-    @debug "Local equivalent:" ext_info b
+    # @debug "Local equivalent:" ext_info b
     return b
 end
 
@@ -766,7 +766,7 @@ peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, 
     cmd_list = Cmd[]
     uri = a.original_url
     
-    push!(cmd_list, Cmd(`curl -s $uri`,ignorestatus=true))
+    push!(cmd_list, Cmd(`curl -s -L $uri`,ignorestatus=true))
     j = decomp_option(a)
     if !isnothing(j)
         push!(cmd_list, Cmd(`tar -t -v $j -f -`,ignorestatus=true))
@@ -877,7 +877,7 @@ ping_archive(a::BulkArchive, cif_block::CifContainer) = begin
     ei = get_loop(cif_block, "$c.id")
     all_uris = unique(getproperty(ei, "$c.uri"))
     bad = filter(all_uris) do au
-        !success(pipeline(`curl -s $au -r 0-0 --fail`, devnull))
+        !success(pipeline(`curl -L -s $au -r 0-0 --fail`, devnull))
     end
     if length(bad) > 0
         @debug "Following URLs not available" bad
