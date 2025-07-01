@@ -308,6 +308,9 @@ download_images_os(a::DirectoryArchive, ext_info) = begin
     ext_scheme = a.original_url.scheme
     
     aurl = "$(a.original_url)"
+
+    downloader = get_redirecting_downloader()
+    
     for r in eachrow(ext_info)
 
         full_uri = "$(getproperty(r,"$(c)uri"))"
@@ -328,7 +331,9 @@ download_images_os(a::DirectoryArchive, ext_info) = begin
 
         elseif ext_scheme in ("https", "http")
 
-            req = request(full_uri)
+            # Use our downloader object so we can follow redirects
+            
+            req = request(full_uri, downloader = downloader)
             fs = get_file_size(req)
         
             if fs == 0 && a.max_down > 0
@@ -591,7 +596,7 @@ imgload(a::ImageArchive, ext_info::DataFrame) = begin
 
     # Fix any leftover long column names
 
-    rename!(x-> replace(x,"_array_data_external_data." => ""),ext_info)
+    DataFrames.rename!(x-> replace(x,"_array_data_external_data." => ""),ext_info)
     
     temp_locals = local_equivalent.(Ref(a), eachrow(ext_info))
     if nothing in temp_locals
@@ -825,6 +830,20 @@ peek_image(a::TarArchive, cif_block::CifContainer; entry_no=0, check_name=true, 
 
 end
 
+get_redirecting_downloader() = begin
+
+    downloader = Downloader()
+
+    # Follow redirects
+    
+    easy_hook = (easy, info) -> begin
+        Curl.setopt(easy, Curl.CURLOPT_FOLLOWLOCATION, 1)
+    end
+    downloader.easy_hook = easy_hook
+
+    return downloader
+end
+
 get_file_size(r) = 0
 
 get_file_size(r::Response) = begin
@@ -836,10 +855,11 @@ get_file_size(r::Response) = begin
 end
 
 get_file_size(a::TarArchive) = begin
-
+    
     scheme = a.original_url.scheme
+    
     if scheme in ("https", "http")   #only these for now
-        req = request("$(a.original_url)")
+        req = request("$(a.original_url)", downloader = get_redirecting_downloader())
         return get_file_size(req)
     end
 
@@ -928,7 +948,8 @@ supports_range_header(server_url::AbstractString) = begin
     @debug "Trying a proper download to check range header" server_url
     
     easy_hook = (easy, info) -> begin
-        Curl.setopt(easy, Curl.CURLOPT_MAXFILESIZE, 10)
+        Curl.setopt(easy, Curl.CURLOPT_MAXFILESIZE, 500)
+        Curl.setopt(easy, Curl.CURLOPT_FOLLOWLOCATION, 1)
     end
 
     downloader.easy_hook = easy_hook
@@ -936,6 +957,8 @@ supports_range_header(server_url::AbstractString) = begin
     req = request(server_url, headers=["Range"=>"bytes=0-100"], throw = false,
                   output = mktemp()[2], downloader = downloader)
 
+    @debug "Status after checking for range headers" req
+    
     return is_partial_download(req)
     
 end

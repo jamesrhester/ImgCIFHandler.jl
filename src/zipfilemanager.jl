@@ -37,12 +37,16 @@ using `insecure` keyword to allow non-SSL connections"))
     end
 
     @debug "Real url $real_url"
-    
+
+    # Follow redirects
+
+    downloader = get_redirecting_downloader()
+
     if supports_range_header(real_url)
 
         # Get total size of file
 
-        full_size = get_file_size(request(real_url))
+        full_size = get_file_size(request(real_url, downloader = downloader))
 
         # Some simple servers can't handle empty start bytes
         
@@ -57,7 +61,8 @@ using `insecure` keyword to allow non-SSL connections"))
         # We generate the index
 
         io = IOBuffer()
-        req = request(real_url, headers = ["Range" => range_str], output = io)
+        req = request(real_url, headers = ["Range" => range_str], output = io,
+                      downloader = downloader)
 
         @debug "Downloaded 65000 last bytes from $real_url" req
 
@@ -68,7 +73,8 @@ using `insecure` keyword to allow non-SSL connections"))
         # Now download the full end of the zip file
 
         seek(io, 0)
-        req = request(real_url, headers=["Range" => "bytes=$cdir-$(full_size - 1)"], output = io)
+        req = request(real_url, headers=["Range" => "bytes=$cdir-$(full_size - 1)"],
+                      output = io, downloader = downloader)
 
         @debug "Result of central directory request" req
         
@@ -126,6 +132,8 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
     uri = getproperty(ei,"_array_data_external_data.uri")
     path_in_arch = getproperty(ei, "_array_data_external_data.archive_path")
 
+    downloader = get_redirecting_downloader()
+    
     if length(a.file_directory) == 0
 
         # Get entire Zip file
@@ -134,7 +142,7 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
 
             # Determine file size
         
-            fs = get_file_size(request(uri))
+            fs = get_file_size(request(uri, downloader = downloader))
         
             if fs > max_down
                 throw(error("File size $fs too large (max $max_down). Consider using -l or -s options after unpacking locally, or increasing maximum download using -m"))
@@ -178,7 +186,7 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
 
         io = IOBuffer()
         resp = request("$(get_real_url(a))", headers = ["Range" => "bytes=$start-$(start+file_len)"],
-                       output = io)
+                       output = io, downloader = downloader)
 
         @debug "Obtained compressed chunk" resp
 
@@ -189,7 +197,7 @@ peek_image(a::ZipArchive, cif_block::CifContainer; entry_no=0, max_down = 2.0e7)
             
             io = IOBuffer()
             resp = request("$(get_real_url(a))", headers = ["Range" => "bytes=$start-$(start+new_file_len)"],
-                           output = io)
+                           output = io, downloader = downloader)
 
             @debug "Re-downloaded with correct length" resp
             zip_deflate(io, 0, new_file_len, local_equivalent(a, ei))
@@ -221,7 +229,7 @@ access_remote_zip(zip_url, start, finish) = begin
         throw(error("Server doesn't support range: $zip_url"))
     end
 
-    hdrs = request(zip_url)   #just the headers
+    hdrs = request(zip_url, downloader = get_redirecting_downloader())   #just the headers
     file_size = get_file_size(hdrs)
     if finish > file_size
         throw(error("End pos $finish too large, file is only $file_size"))

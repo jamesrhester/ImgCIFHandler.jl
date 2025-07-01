@@ -33,6 +33,17 @@ prepare_cf(imgcif, full, max_down) = begin
     return cf, la[]
 end
 
+@testset "Test redirects" begin
+
+    # Following URL is in old zenodo form. We want information
+    # where URL contains word 'records'. Redirect is automatic.
+    old_url = "https://zenodo.org/record/7265997/files/ktart2_cbf.imgcif"
+    good_url = "https://zenodo.org/records/7265997/files/ktart2_cbf.imgcif"
+    @test ImgCIFHandler.handles_secure(old_url) == ImgCIFHandler.handles_secure(good_url)
+    @test ImgCIFHandler.supports_range_header(old_url)
+    
+end
+
 @testset "rsync + SMV" begin
 
     pr = fire_up_rsync()
@@ -117,4 +128,3 @@ end
     img = imgload(cf, "1", la)
     @test size(img) == (2048, 2048)
 end
-

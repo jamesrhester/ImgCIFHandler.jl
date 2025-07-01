@@ -708,7 +708,7 @@ external_specs_from_bin_ids(bin_ids::Vector,c) = begin
 
     transform!(info, "$ext_cat.uri" => (x->make_absolute_uri.(Ref(c),x)) => :full_uri)
     select!(info, Not("$ext_cat.uri"))
-    rename!(info, :full_uri => "$ext_cat.uri")
+    DataFrames.rename!(info, :full_uri => "$ext_cat.uri")
     
     @debug "Images for $bin_ids: $info"
 

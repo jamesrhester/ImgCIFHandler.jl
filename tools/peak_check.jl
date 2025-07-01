@@ -162,13 +162,7 @@ create_peak_image(incif, predicted::Vector{Vector{Vector{Peak}}}; redo=true, ski
 
     # Find the beam centre coords
     
-    detx_pos = indexin(["detx", "ele1_x"], incif["_axis.id"])
-    if isnothing(detx_pos[1])
-        detx_pos = detx_pos[2]
-    else
-        detx_pos = detx_pos[1]
-    end
-    
+    detx_pos = indexin([get_surface_axes(incif)[1]], incif["_axis.id"])[]
     cent_coords = incif["_axis.offset[1]"][detx_pos], incif["_axis.offset[2]"][detx_pos]
     
     caption = "$(basename(incif.original_file)) Centre $(cent_coords[1]) $(cent_coords[2])"
