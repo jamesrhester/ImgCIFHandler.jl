@@ -508,7 +508,7 @@ local_equivalent(a::DirectoryArchive, ext_info::DataFrameRow) = begin
         base = joinpath(a.local_cache, unique_part)
     end
 
-    @debug "Constructed local path" u base_part base
+    # @debug "Constructed local path" u base_part base
     
     if "$(c)file_compression" in names(ext_info)
         return base * "_final"
@@ -539,7 +539,7 @@ has_local_version(a::ImageArchive, ext_info) = begin
     if isnothing(l)
         return true
     end
-    @debug "Local path is" l
+    # @debug "Local path is" l
     ispath(l)
 end
 
