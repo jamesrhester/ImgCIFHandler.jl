@@ -86,7 +86,7 @@ get_axis_settings(imgcif::CifContainer,axis_names, args...) = begin
     end
 
     if haskey(imgcif,"_diffrn_scan_frame_axis.axis_id") && length(args) > 0
-        return get_explicit_frame(imgcif, args...)
+        return get_explicit_frame(imgcif, axis_names, axis_types)
     end
 
     # Calculate settings
@@ -133,6 +133,32 @@ get_axis_settings(imgcif::CifContainer,axis_names, args...) = begin
             start + (frameno-1)*increment
         end
     end
+    return axis_names, axis_types, positions
+end
+
+"""
+    get_explicit_frame(imgcif::CifContainer, axis_names, axis_types)
+
+Single-image files (e.g. CBF) use the `diffrn_scan_frame_axis`
+category to explicitly state the positions of their axes.
+"""
+get_explicit_frame(imgcif::CifContainer, axis_names, axis_types) = begin
+
+    cat = "_diffrn_scan_frame_axis"
+    if !haskey(imgcif,"$cat.axis_id")
+        throw(error("Cannot get explicit frame as $cat category is missing"))
+    end
+
+    all_info = get_loop(imgcif, "$cat.axis_id")
+    positions = map(axis_names, axis_types) do one_axis, one_type
+        pos = indexin([one_axis], all_info[!,"$cat.axis_id"])[]
+        if one_type == "translation"
+            parse(Float64, all_info[!,"$cat.displacement"][pos])
+        else
+            parse(Float64, all_info[!,"$cat.angle"][pos])
+        end
+    end
+
     return axis_names, axis_types, positions
 end
 
@@ -315,19 +341,15 @@ get_axis_poise(incif::CifContainer, axis_id, args...) = begin
     current = start_vector
     current_shift = start_offset
 
-    @debug "Shift at beginning" current_shift
-    
-    for (n, v, o, t, p) in zip(ax_nm, ax_vec, ax_offset, ax_types, ax_pos)
+    for (n, v, off, t, p) in zip(ax_nm, ax_vec, ax_offset, ax_types, ax_pos)
         if t == "rotation"
             @debug "Now rotating $current by $p" n
             rotmat = AngleAxis(p*pi/180,v...)
             current = rotmat * current
-            current_shift = rotmat * current_shift + o
-            @debug "Shift" current_shift rotmat o
+            current_shift = rotmat * current_shift + off
         else
             @debug "Now translating $current_shift by $p along $v" n
-            current_shift = current_shift + o + p * v
-            @debug "After" current_shift
+            current_shift = current_shift + off + p * v
         end
         
     end
